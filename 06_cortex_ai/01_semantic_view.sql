@@ -131,7 +131,7 @@ CREATE OR REPLACE SEMANTIC VIEW AGENTS.SALES_ANALYTICS_SV
       WITH SYNONYMS = ('sales channel')
       COMMENT = 'Sales channel: Online, In-Store, Partner, Marketplace',
     orders.source_system AS SOURCE_SYSTEM
-      COMMENT = 'Data source: NATIVE, ADF, or STREAMING'
+      COMMENT = 'Data source system'
   )
 
   METRICS (

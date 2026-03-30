@@ -56,7 +56,7 @@ CREATE OR REPLACE TABLE RAW.PRODUCTS (
 COMMENT = 'Product catalog';
 
 -- -----------------------------------------------------------------------------
--- Orders — Sales orders (native + ADF + streaming sources)
+-- Orders — Sales orders
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE TABLE RAW.ORDERS (
     ORDER_ID          NUMBER AUTOINCREMENT PRIMARY KEY,
@@ -70,7 +70,7 @@ CREATE OR REPLACE TABLE RAW.ORDERS (
     SHIPPING_ADDRESS  VARCHAR(500),
     REGION            VARCHAR(50)    COMMENT 'North America, Europe, Asia Pacific, Latin America',
     CHANNEL           VARCHAR(50)    COMMENT 'Online, In-Store, Partner, Marketplace',
-    SOURCE_SYSTEM     VARCHAR(50)    DEFAULT 'NATIVE' COMMENT 'NATIVE, ADF, or STREAMING',
+    SOURCE_SYSTEM     VARCHAR(50)    DEFAULT 'NATIVE' COMMENT 'Data source system',
     CREATED_AT        TIMESTAMP_NTZ  DEFAULT CURRENT_TIMESTAMP(),
     UPDATED_AT        TIMESTAMP_NTZ  DEFAULT CURRENT_TIMESTAMP()
 )
@@ -123,89 +123,6 @@ CREATE OR REPLACE TABLE RAW.SUPPORT_TICKETS (
     RESOLVED_AT           TIMESTAMP_NTZ
 )
 COMMENT = 'Support tickets — used for ML priority classification';
-
--- -----------------------------------------------------------------------------
--- Website Clickstream — Snowpipe auto-ingest from ADLS
--- -----------------------------------------------------------------------------
-CREATE OR REPLACE TABLE RAW.WEBSITE_CLICKSTREAM (
-    EVENT_ID          VARCHAR(100),
-    SESSION_ID        VARCHAR(100),
-    CUSTOMER_ID       NUMBER,
-    PAGE_URL          VARCHAR(1000),
-    EVENT_TYPE        VARCHAR(50)    COMMENT 'page_view, click, add_to_cart, purchase, search',
-    REFERRER          VARCHAR(500),
-    DEVICE_TYPE       VARCHAR(20)    COMMENT 'Desktop, Mobile, Tablet',
-    BROWSER           VARCHAR(50),
-    IP_ADDRESS        VARCHAR(50),
-    EVENT_TIMESTAMP   TIMESTAMP_NTZ,
-    EVENT_PROPERTIES  VARIANT,
-    LOADED_AT         TIMESTAMP_NTZ  DEFAULT CURRENT_TIMESTAMP()
-)
-COMMENT = 'Website clickstream — loaded via Snowpipe from ADLS Gen2';
-
--- -----------------------------------------------------------------------------
--- IoT Sensor Data — Snowpipe Streaming from Event Hubs
--- -----------------------------------------------------------------------------
--- Note: Snowpipe Streaming auto-creates this table, but we define it for reference.
--- The Kafka connector creates columns RECORD_METADATA and RECORD_CONTENT.
-CREATE OR REPLACE TABLE RAW.IOT_SENSOR_DATA (
-    RECORD_METADATA  VARIANT COMMENT 'Kafka metadata (offset, partition, topic, etc.)',
-    RECORD_CONTENT   VARIANT COMMENT 'Raw JSON payload from IoT sensors'
-)
-COMMENT = 'IoT sensor data — loaded via Snowpipe Streaming from Azure Event Hubs';
-
--- Convenience view to extract structured fields from the raw JSON
-CREATE OR REPLACE VIEW RAW.V_IOT_SENSOR_DATA AS
-SELECT
-    RECORD_CONTENT:device_id::VARCHAR          AS DEVICE_ID,
-    RECORD_CONTENT:sensor_type::VARCHAR        AS SENSOR_TYPE,
-    RECORD_CONTENT:temperature::FLOAT          AS TEMPERATURE,
-    RECORD_CONTENT:humidity::FLOAT             AS HUMIDITY,
-    RECORD_CONTENT:pressure::FLOAT             AS PRESSURE,
-    RECORD_CONTENT:battery_level::FLOAT        AS BATTERY_LEVEL,
-    RECORD_CONTENT:location::VARCHAR           AS LOCATION,
-    RECORD_CONTENT:timestamp::TIMESTAMP_NTZ    AS EVENT_TIMESTAMP,
-    RECORD_CONTENT:alert_status::VARCHAR       AS ALERT_STATUS
-FROM RAW.IOT_SENSOR_DATA;
-
--- =============================================================================
--- STAGING SCHEMA — Landing zone for external ingestion
--- =============================================================================
-
-USE SCHEMA STAGING;
-
--- -----------------------------------------------------------------------------
--- ADF Inventory — Landed by Azure Data Factory
--- -----------------------------------------------------------------------------
-CREATE OR REPLACE TABLE STAGING.ADF_INVENTORY (
-    INVENTORY_ID         NUMBER,
-    PRODUCT_ID           NUMBER,
-    WAREHOUSE_LOCATION   VARCHAR(100),
-    QUANTITY_ON_HAND     NUMBER,
-    QUANTITY_RESERVED    NUMBER,
-    REORDER_POINT        NUMBER,
-    LAST_RESTOCK_DATE    DATE,
-    SUPPLIER_ID          NUMBER,
-    INGESTED_AT          TIMESTAMP_NTZ  DEFAULT CURRENT_TIMESTAMP(),
-    ADF_PIPELINE_RUN_ID  VARCHAR(100)
-)
-COMMENT = 'Inventory data loaded by Azure Data Factory';
-
--- -----------------------------------------------------------------------------
--- ADF Supplier Data — Landed by Azure Data Factory
--- -----------------------------------------------------------------------------
-CREATE OR REPLACE TABLE STAGING.ADF_SUPPLIER_DATA (
-    SUPPLIER_ID          NUMBER,
-    SUPPLIER_NAME        VARCHAR(200),
-    CONTACT_EMAIL        VARCHAR(255),
-    COUNTRY              VARCHAR(50),
-    LEAD_TIME_DAYS       NUMBER,
-    RELIABILITY_SCORE    NUMBER(3,2),
-    CONTRACT_START_DATE  DATE,
-    CONTRACT_END_DATE    DATE,
-    INGESTED_AT          TIMESTAMP_NTZ  DEFAULT CURRENT_TIMESTAMP()
-)
-COMMENT = 'Supplier data loaded by Azure Data Factory';
 
 -- =============================================================================
 -- INTERNAL STAGES — For ML models and semantic model YAML

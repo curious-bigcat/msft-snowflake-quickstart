@@ -47,13 +47,6 @@ CREATE WAREHOUSE IF NOT EXISTS DEMO_WH
   INITIALLY_SUSPENDED = TRUE
   COMMENT = 'General-purpose warehouse for demo queries';
 
-CREATE WAREHOUSE IF NOT EXISTS DEMO_INGESTION_WH
-  WITH WAREHOUSE_SIZE = 'XSMALL'
-  AUTO_SUSPEND = 60
-  AUTO_RESUME = TRUE
-  INITIALLY_SUSPENDED = TRUE
-  COMMENT = 'Warehouse for Snowpipe and data ingestion';
-
 CREATE WAREHOUSE IF NOT EXISTS DEMO_ML_WH
   WITH WAREHOUSE_SIZE = 'MEDIUM'
   WAREHOUSE_TYPE = 'SNOWPARK-OPTIMIZED'
@@ -73,7 +66,6 @@ CREATE WAREHOUSE IF NOT EXISTS DEMO_CORTEX_WH
 -- Grant warehouse usage
 GRANT USAGE ON WAREHOUSE DEMO_WH TO ROLE DEMO_ADMIN;
 GRANT USAGE ON WAREHOUSE DEMO_WH TO ROLE DEMO_ANALYST;
-GRANT USAGE ON WAREHOUSE DEMO_INGESTION_WH TO ROLE DEMO_ADMIN;
 GRANT USAGE ON WAREHOUSE DEMO_ML_WH TO ROLE DEMO_ADMIN;
 GRANT USAGE ON WAREHOUSE DEMO_ML_WH TO ROLE DEMO_ML_ENGINEER;
 GRANT USAGE ON WAREHOUSE DEMO_CORTEX_WH TO ROLE DEMO_ADMIN;
@@ -95,7 +87,7 @@ USE DATABASE MSFT_SNOWFLAKE_DEMO;
 CREATE SCHEMA IF NOT EXISTS RAW
   COMMENT = 'Landing zone for raw source data';
 CREATE SCHEMA IF NOT EXISTS STAGING
-  COMMENT = 'Staging area for external ingestion (ADF, Snowpipe)';
+  COMMENT = 'Staging area for data transformations';
 CREATE SCHEMA IF NOT EXISTS CURATED
   COMMENT = 'Cleansed and enriched data';
 CREATE SCHEMA IF NOT EXISTS ANALYTICS
@@ -144,7 +136,7 @@ GRANT SELECT ON ALL TABLES IN DATABASE MSFT_SNOWFLAKE_DEMO TO ROLE DEMO_AGENT_US
 GRANT SELECT ON FUTURE TABLES IN DATABASE MSFT_SNOWFLAKE_DEMO TO ROLE DEMO_AGENT_USER;
 
 -- =============================================================================
--- 4. AZURE STORAGE INTEGRATION (for ADLS Gen2 / Snowpipe)
+-- 4. AZURE STORAGE INTEGRATION (for ADLS Gen2)
 -- =============================================================================
 -- Replace placeholders with your Azure values
 
@@ -163,23 +155,6 @@ CREATE OR REPLACE STORAGE INTEGRATION AZURE_STORAGE_INT
 -- in your Azure Storage Account's IAM settings.
 
 GRANT USAGE ON INTEGRATION AZURE_STORAGE_INT TO ROLE DEMO_ADMIN;
-
--- =============================================================================
--- 5. NOTIFICATION INTEGRATION (for Snowpipe Azure Event Grid)
--- =============================================================================
-
-CREATE OR REPLACE NOTIFICATION INTEGRATION AZURE_EVENT_NOTIFICATION_INT
-  ENABLED = TRUE
-  TYPE = QUEUE
-  NOTIFICATION_PROVIDER = AZURE_STORAGE_QUEUE
-  AZURE_STORAGE_QUEUE_PRIMARY_URI = 'https://<your_storage_account>.queue.core.windows.net/<your_queue_name>'
-  AZURE_TENANT_ID = '<your_azure_tenant_id>';
-
--- Run this to get the consent URL:
--- DESC NOTIFICATION INTEGRATION AZURE_EVENT_NOTIFICATION_INT;
--- Grant 'Storage Queue Data Contributor' to the service principal in Azure.
-
-GRANT USAGE ON INTEGRATION AZURE_EVENT_NOTIFICATION_INT TO ROLE DEMO_ADMIN;
 
 -- =============================================================================
 -- 6. EXTERNAL VOLUME FOR ONELAKE / FABRIC
