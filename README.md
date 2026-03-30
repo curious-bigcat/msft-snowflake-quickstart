@@ -84,10 +84,8 @@ See [`01_setup/02_azure_prerequisites.md`](01_setup/02_azure_prerequisites.md) f
 ### Phase 4: Machine Learning
 | File | Description |
 |---|---|
-| [`05_ml_models/01_feature_engineering.py`](05_ml_models/01_feature_engineering.py) | Feature tables with StandardScaler, OrdinalEncoder, MinMaxScaler |
-| [`05_ml_models/02_classification_model.py`](05_ml_models/02_classification_model.py) | RandomForest + LogisticRegression for ticket priority prediction |
-| [`05_ml_models/03_regression_model.py`](05_ml_models/03_regression_model.py) | XGBRegressor + LinearRegression for revenue prediction |
-| [`05_ml_models/04_model_registry.py`](05_ml_models/04_model_registry.py) | Model Registry: versioning, deployment, SQL inference |
+| [`05_ml_models/01_ticket_priority_classifier.ipynb`](05_ml_models/01_ticket_priority_classifier.ipynb) | End-to-end: features → RandomForest + LogisticRegression → registry |
+| [`05_ml_models/02_revenue_predictor.ipynb`](05_ml_models/02_revenue_predictor.ipynb) | End-to-end: features → XGBRegressor + LinearRegression → registry |
 
 **ML stack:** snowflake.ml.modeling (scikit-learn wrappers), Snowflake Model Registry, Snowpark-optimized warehouse.
 
@@ -138,21 +136,19 @@ Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7
 | 5 | `04_processing/01_dynamic_tables.sql` | Snowsight SQL Worksheet |
 | 6 | `04_processing/02_streams_and_tasks.sql` | Snowsight SQL Worksheet |
 | 7 | `04_processing/03_snowpark_processing.py` | Snowflake Notebook or local Python |
-| 8 | `05_ml_models/01_feature_engineering.py` | Snowflake Notebook (DEMO_ML_WH) |
-| 9 | `05_ml_models/02_classification_model.py` | Snowflake Notebook (DEMO_ML_WH) |
-| 10 | `05_ml_models/03_regression_model.py` | Snowflake Notebook (DEMO_ML_WH) |
-| 11 | `05_ml_models/04_model_registry.py` | Snowflake Notebook (DEMO_ML_WH) |
-| 12 | `06_cortex_ai/01_semantic_view.sql` | Snowsight SQL Worksheet |
-| 13 | `06_cortex_ai/02_cortex_search_service.sql` | Snowsight SQL Worksheet |
-| 14 | `06_cortex_ai/03_cortex_agent.sql` | Snowsight SQL Worksheet |
-| 15 | `06_cortex_ai/04_mcp_server.sql` | Snowsight SQL Worksheet |
-| 16 | `06_cortex_ai/05_snowflake_intelligence.sql` | Snowsight SQL Worksheet |
-| 17 | `07_fabric_integration/01_external_volume_onelake.sql` | Snowsight (ACCOUNTADMIN) |
-| 18 | `07_fabric_integration/02_iceberg_tables_to_fabric.sql` | Snowsight SQL Worksheet |
-| 19 | `07_fabric_integration/03_catalog_integration_onelake.sql` | Snowsight (ACCOUNTADMIN) |
-| 20 | `07_fabric_integration/04_fabric_setup_guide.md` | Fabric Portal |
-| 21 | `08_multi_agent_orchestration/01_foundry_agent_setup.md` | Azure AI Foundry Portal |
-| 22 | `08_multi_agent_orchestration/02_multi_agent_workflow.md` | Snowsight + Foundry Portal + MCP clients |
+| 8 | `05_ml_models/01_ticket_priority_classifier.ipynb` | Snowflake Workspace Notebook (DEMO_ML_WH) |
+| 9 | `05_ml_models/02_revenue_predictor.ipynb` | Snowflake Workspace Notebook (DEMO_ML_WH) |
+| 10 | `06_cortex_ai/01_semantic_view.sql` | Snowsight SQL Worksheet |
+| 11 | `06_cortex_ai/02_cortex_search_service.sql` | Snowsight SQL Worksheet |
+| 12 | `06_cortex_ai/03_cortex_agent.sql` | Snowsight SQL Worksheet |
+| 13 | `06_cortex_ai/04_mcp_server.sql` | Snowsight SQL Worksheet |
+| 14 | `06_cortex_ai/05_snowflake_intelligence.sql` | Snowsight SQL Worksheet |
+| 15 | `07_fabric_integration/01_external_volume_onelake.sql` | Snowsight (ACCOUNTADMIN) |
+| 16 | `07_fabric_integration/02_iceberg_tables_to_fabric.sql` | Snowsight SQL Worksheet |
+| 17 | `07_fabric_integration/03_catalog_integration_onelake.sql` | Snowsight (ACCOUNTADMIN) |
+| 18 | `07_fabric_integration/04_fabric_setup_guide.md` | Fabric Portal |
+| 19 | `08_multi_agent_orchestration/01_foundry_agent_setup.md` | Azure AI Foundry Portal |
+| 20 | `08_multi_agent_orchestration/02_multi_agent_workflow.md` | Snowsight + Foundry Portal + MCP clients |
 
 ## Key Snowflake Objects Created
 
@@ -172,10 +168,11 @@ Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7
 
 ## Python Dependencies
 
+Phase 4 (ML) notebooks are designed to run in **Snowflake Workspace** — all required packages (`snowflake-ml-python`, `xgboost`) are pre-installed. No local `pip install` needed.
+
+For Phase 3 Snowpark processing, if running locally:
 ```bash
-# Snowflake packages (for Phases 3-4: Snowpark processing and ML)
 pip install snowflake-snowpark-python
-pip install snowflake-ml-python
 ```
 
 Phase 7 (Multi-Agent Orchestration) is entirely UI-driven via Azure AI Foundry Portal and Snowsight — no Python packages needed.
