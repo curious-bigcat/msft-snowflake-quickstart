@@ -1,0 +1,229 @@
+# =============================================================================
+# MSFT-SNOWFLAKE QUICKSTART LAB: Multi-Agent Orchestration Configuration
+# =============================================================================
+# Central reference for the multi-agent orchestration layer.
+# All setup is done via UI (Azure AI Foundry Portal + Snowsight).
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Azure AI Foundry Configuration
+# ---------------------------------------------------------------------------
+azure:
+  foundry_portal: "https://ai.azure.com"
+  model_deployment: "gpt-4o-mini"
+  # Agents are created via: Foundry Portal → Build → Agents → + New agent
+  # MCP connection via: Foundry Portal → Management → Connected resources
+
+# ---------------------------------------------------------------------------
+# Snowflake Configuration
+# ---------------------------------------------------------------------------
+snowflake:
+  snowsight_url: "https://<org>-<account>.snowflakecomputing.com"
+  database: "MSFT_SNOWFLAKE_DEMO"
+  schema: "AGENTS"
+
+  # Snowflake Intelligence: Snowsight → AI & ML → Agents
+  intelligence_agent: "Sales & Support Assistant"
+
+  # MCP Server
+  mcp_server:
+    name: "DEMO_MCP_SERVER"
+    endpoint: "https://<org>-<account>.snowflakecomputing.com/api/v2/databases/MSFT_SNOWFLAKE_DEMO/schemas/AGENTS/mcp-servers/DEMO_MCP_SERVER/sse"
+    authentication: "Bearer token (Snowflake PAT)"
+
+    tools:
+      - name: "sales-analyst"
+        type: "CORTEX_ANALYST_MESSAGE"
+        description: "Natural language to SQL via semantic view"
+
+      - name: "product-review-search"
+        type: "CORTEX_SEARCH_SERVICE_QUERY"
+        description: "Semantic search over product reviews"
+
+      - name: "support-ticket-search"
+        type: "CORTEX_SEARCH_SERVICE_QUERY"
+        description: "Semantic search over support tickets"
+
+      - name: "sales-support-agent"
+        type: "CORTEX_AGENT_RUN"
+        description: "Orchestrated Cortex Agent (multi-tool)"
+
+      - name: "sql-executor"
+        type: "SYSTEM_EXECUTE_SQL"
+        description: "Direct SQL execution"
+
+  # Cortex Agent (native Snowflake)
+  cortex_agent:
+    name: "SALES_SUPPORT_AGENT"
+    fqn: "MSFT_SNOWFLAKE_DEMO.AGENTS.SALES_SUPPORT_AGENT"
+    access_via: "Snowsight → AI & ML → Agents → Sales & Support Assistant"
+
+# ---------------------------------------------------------------------------
+# Foundry Agents (created via Azure AI Foundry Portal)
+# ---------------------------------------------------------------------------
+agents:
+  data_analyst:
+    name: "Snowflake Data Analyst"
+    purpose: "Structured data queries (revenue, orders, metrics)"
+    platform: "Azure AI Foundry"
+    created_via: "Foundry Portal → Build → Agents → + New agent"
+    tools_used:
+      - "sales-analyst (MCP)"
+      - "sql-executor (MCP)"
+
+  customer_insights:
+    name: "Customer Insights Agent"
+    purpose: "Unstructured search (reviews, tickets, sentiment)"
+    platform: "Azure AI Foundry"
+    created_via: "Foundry Portal → Build → Agents → + New agent"
+    tools_used:
+      - "product-review-search (MCP)"
+      - "support-ticket-search (MCP)"
+
+  fabric_data:
+    name: "Fabric Data Agent"
+    purpose: "Microsoft Fabric data (targets, budgets, campaigns)"
+    platform: "Azure AI Foundry"
+    created_via: "Foundry Portal → Build → Agents → + New agent"
+    tools_used:
+      - "Code Interpreter"
+
+  orchestrator:
+    name: "Business Intelligence Orchestrator"
+    purpose: "Routes questions to the best specialist agent"
+    platform: "Azure AI Foundry"
+    created_via: "Foundry Portal → Build → Agents → + New agent"
+    tools_used:
+      - "All 5 MCP tools"
+      - "Code Interpreter"
+
+  cortex_sales_support:
+    name: "Sales & Support Agent"
+    purpose: "Multi-tool orchestrated agent (Analyst + Search)"
+    platform: "Snowflake (native)"
+    created_via: "Snowsight SQL Worksheet (06_cortex_ai/03_cortex_agent.sql)"
+    tools_used:
+      - "cortex_analyst_text_to_sql"
+      - "cortex_search"
+      - "data_to_chart"
+
+# ---------------------------------------------------------------------------
+# Orchestration Workflows (all tested via UI)
+# ---------------------------------------------------------------------------
+workflows:
+
+  sequential_pipeline:
+    description: "Data → Insights → Report (each agent builds on prior output)"
+    how_to_test: "Manual chaining in Foundry Playground — copy output from one agent chat to next"
+    steps:
+      - agent: "data_analyst"
+        action: "Query structured data for metrics"
+        ui: "Foundry Playground"
+      - agent: "customer_insights"
+        action: "Search for related customer feedback"
+        ui: "Foundry Playground (paste previous output as context)"
+      - agent: "orchestrator"
+        action: "Synthesize findings into executive report"
+        ui: "Foundry Playground (paste both outputs as context)"
+
+  parallel_analysis:
+    description: "Multiple agents answer same question, results compared"
+    how_to_test: "Open two browser tabs — Snowflake Intelligence + Foundry Playground"
+    parallel_agents:
+      - agent: "cortex_sales_support"
+        ui: "Snowsight → AI & ML → Agents"
+      - agent: "orchestrator"
+        ui: "Foundry Portal → Agents → Orchestrator"
+
+  intelligent_router:
+    description: "Orchestrator routes question to best tool automatically"
+    how_to_test: "Ask the Business Intelligence Orchestrator — it routes via LLM"
+    routing_rules:
+      - pattern: "revenue, sales, orders, metrics, KPI"
+        route_to: "sales-analyst tool"
+      - pattern: "review, feedback, sentiment, complaint"
+        route_to: "product-review-search tool"
+      - pattern: "ticket, support, issue, troubleshoot"
+        route_to: "support-ticket-search tool"
+      - pattern: "compare, combined, overview, cross-platform"
+        route_to: "sales-support-agent tool"
+
+  cross_platform_comparison:
+    description: "Compare Fabric targets with Snowflake actuals"
+    how_to_test: "Get targets from Fabric Agent, actuals from Snowflake Intelligence, synthesize in Orchestrator"
+    steps:
+      - agent: "fabric_data"
+        query: "Get regional sales targets"
+        ui: "Foundry Playground"
+      - agent: "cortex_sales_support"
+        query: "Get actual revenue by region"
+        ui: "Snowflake Intelligence"
+      - agent: "orchestrator"
+        query: "Compare targets vs actuals (paste both)"
+        ui: "Foundry Playground"
+
+# ---------------------------------------------------------------------------
+# MCP Client Configurations (for Cursor, Claude Desktop, VS Code)
+# ---------------------------------------------------------------------------
+mcp_clients:
+
+  cursor:
+    config_file: ".cursor/mcp.json"
+    config: |
+      {
+        "mcpServers": {
+          "snowflake-demo": {
+            "url": "https://<org>-<account>.snowflakecomputing.com/api/v2/databases/MSFT_SNOWFLAKE_DEMO/schemas/AGENTS/mcp-servers/DEMO_MCP_SERVER/sse",
+            "headers": {
+              "Authorization": "Bearer <YOUR_SNOWFLAKE_PAT>"
+            }
+          }
+        }
+      }
+
+  claude_desktop:
+    config_file_macos: "~/Library/Application Support/Claude/claude_desktop_config.json"
+    config_file_windows: "%APPDATA%\\Claude\\claude_desktop_config.json"
+    config: |
+      {
+        "mcpServers": {
+          "snowflake-demo": {
+            "url": "https://<org>-<account>.snowflakecomputing.com/api/v2/databases/MSFT_SNOWFLAKE_DEMO/schemas/AGENTS/mcp-servers/DEMO_MCP_SERVER/sse",
+            "headers": {
+              "Authorization": "Bearer <YOUR_SNOWFLAKE_PAT>"
+            }
+          }
+        }
+      }
+
+# ---------------------------------------------------------------------------
+# Architecture Diagram
+# ---------------------------------------------------------------------------
+#
+#   ┌─────────────────────────────────────────────────────────┐
+#   │              AZURE AI FOUNDRY PORTAL                    │
+#   │                                                         │
+#   │   Data Analyst │ Customer Insights │ Fabric │ Orchestr. │
+#   └───────┬─────────┬──────────┬──────────┬────────────────┘
+#           │         │          │          │
+#           └────┬────┘          │          │
+#                │               │          │
+#   ┌────────────▼────────────┐  │    ┌─────▼─────────────────┐
+#   │  Snowflake MCP Server   │  │    │  Snowflake Intelligence│
+#   │  (DEMO_MCP_SERVER)      │  │    │  (Cortex Agent UI)     │
+#   │                         │  │    │                        │
+#   │  ┌───────────────────┐  │  │    │  ┌──────────────────┐  │
+#   │  │ Cortex Analyst    │  │  │    │  │ Sales & Support  │  │
+#   │  │ Cortex Search x2  │  │  │    │  │ Agent            │  │
+#   │  │ Cortex Agent      │  │  │    │  └──────────────────┘  │
+#   │  │ SQL Executor      │  │  │    └────────────────────────┘
+#   │  └───────────────────┘  │  │
+#   └─────────────────────────┘  │
+#                                │
+#             ┌──────────────────▼──────────┐
+#             │    Microsoft Fabric         │
+#             │    (OneLake / Iceberg)      │
+#             └─────────────────────────────┘
+#
+#   Also accessible via MCP clients:
+#   Cursor IDE │ Claude Desktop │ VS Code Copilot
