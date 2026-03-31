@@ -157,6 +157,51 @@ CREATE OR REPLACE STORAGE INTEGRATION AZURE_STORAGE_INT
 GRANT USAGE ON INTEGRATION AZURE_STORAGE_INT TO ROLE DEMO_ADMIN;
 
 -- =============================================================================
+-- 5. EXTERNAL STAGE + SNOWPIPE NOTIFICATION INTEGRATION
+-- =============================================================================
+-- External stage points to the ADLS Gen2 container used for data landing.
+-- The notification integration triggers Snowpipe automatically when new
+-- files arrive (via Azure Storage Queue events).
+-- =============================================================================
+
+USE SCHEMA MSFT_SNOWFLAKE_DEMO.RAW;
+
+-- External stage — replace placeholders with your Azure values
+CREATE OR REPLACE STAGE RAW.ADLS_DATA_STAGE
+  URL = 'azure://<your_storage_account>.blob.core.windows.net/snowflake-data/'
+  STORAGE_INTEGRATION = AZURE_STORAGE_INT
+  FILE_FORMAT = (TYPE = 'CSV' FIELD_DELIMITER = ',' SKIP_HEADER = 1
+                 FIELD_OPTIONALLY_ENCLOSED_BY = '"' NULL_IF = ('', 'NULL'))
+  COMMENT = 'External stage for ADLS Gen2 data landing container';
+
+GRANT USAGE ON STAGE RAW.ADLS_DATA_STAGE TO ROLE DEMO_ADMIN;
+
+-- List files in the stage to verify connectivity:
+-- LIST @RAW.ADLS_DATA_STAGE;
+
+-- Notification integration — triggers Snowpipe when files land in ADLS
+-- Requires an Azure Storage Queue connected to blob create events.
+-- Steps:
+--   1. Create a Storage Queue in your Azure Storage Account
+--   2. Add an Event Grid subscription: source = storage account,
+--      event type = "Blob Created", endpoint = the Storage Queue
+--   3. Replace <your_azure_tenant_id>, <your_storage_account>, <your_queue>
+CREATE OR REPLACE NOTIFICATION INTEGRATION AZURE_SNOWPIPE_INT
+  ENABLED = TRUE
+  TYPE = QUEUE
+  NOTIFICATION_PROVIDER = AZURE_STORAGE_QUEUE
+  AZURE_STORAGE_QUEUE_PRIMARY_URI = 'https://<your_storage_account>.queue.core.windows.net/<your_queue>'
+  AZURE_TENANT_ID = '<your_azure_tenant_id>'
+  COMMENT = 'Notification integration for Snowpipe auto-ingest from ADLS Gen2';
+
+-- Run this to get the service principal that needs Queue permissions:
+-- DESC NOTIFICATION INTEGRATION AZURE_SNOWPIPE_INT;
+-- Then assign 'Storage Queue Data Contributor' IAM role to AZURE_MULTI_TENANT_APP_NAME
+-- on the Storage Queue in Azure Portal.
+
+GRANT USAGE ON INTEGRATION AZURE_SNOWPIPE_INT TO ROLE DEMO_ADMIN;
+
+-- =============================================================================
 -- 6. EXTERNAL VOLUME FOR ONELAKE / FABRIC
 -- =============================================================================
 -- This enables writing Iceberg tables to Microsoft Fabric OneLake
@@ -218,6 +263,8 @@ SHOW ROLES LIKE 'DEMO%';
 SHOW WAREHOUSES LIKE 'DEMO%';
 SHOW SCHEMAS IN DATABASE MSFT_SNOWFLAKE_DEMO;
 SHOW STORAGE INTEGRATIONS;
+SHOW NOTIFICATION INTEGRATIONS;
+SHOW STAGES IN SCHEMA MSFT_SNOWFLAKE_DEMO.RAW;
 SHOW FILE FORMATS IN SCHEMA MSFT_SNOWFLAKE_DEMO.RAW;
 
 SELECT 'Setup complete. Review the output above to verify all objects were created.' AS STATUS;

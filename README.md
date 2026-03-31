@@ -62,7 +62,7 @@ See [`01_setup/02_azure_prerequisites.md`](01_setup/02_azure_prerequisites.md) f
 | [`01_setup/01_account_setup.sql`](01_setup/01_account_setup.sql) | Roles, warehouses, database, schemas, integrations, file formats |
 | [`01_setup/02_azure_prerequisites.md`](01_setup/02_azure_prerequisites.md) | Azure resource checklist and configuration guide |
 
-**Creates:** 4 roles, 3 warehouses (including Snowpark-optimized), 6 schemas, storage integration, external volume for OneLake.
+**Creates:** 4 roles, 3 warehouses (including Snowpark-optimized), 6 schemas, storage integration, external ADLS stage, Snowpipe notification integration, external volume for OneLake.
 
 ### Phase 2: Data Creation
 | File | Description |
@@ -188,6 +188,7 @@ Replace these placeholders with your actual values throughout the scripts:
 | `<your_workspace_id>` | Microsoft Fabric workspace GUID |
 | `<your_lakehouse_id>` | Microsoft Fabric Lakehouse GUID |
 | `<your_storage_account>` | Azure Storage Account name |
+| `<your_queue>` | Azure Storage Queue name (for Snowpipe auto-ingest) |
 | `<your_entra_app_client_id>` | Entra ID app registration client ID |
 | `<your_entra_app_client_secret>` | Entra ID app registration secret |
 | `<your-resource>` | Azure AI Foundry resource name |
@@ -211,6 +212,7 @@ DROP WAREHOUSE IF EXISTS DEMO_CORTEX_WH;
 
 -- Drop integrations
 DROP STORAGE INTEGRATION IF EXISTS AZURE_STORAGE_INT;
+DROP NOTIFICATION INTEGRATION IF EXISTS AZURE_SNOWPIPE_INT;
 DROP CATALOG INTEGRATION IF EXISTS FABRIC_ONELAKE_CATALOG_INT;
 DROP EXTERNAL VOLUME IF EXISTS ONELAKE_EXTERNAL_VOL;
 
