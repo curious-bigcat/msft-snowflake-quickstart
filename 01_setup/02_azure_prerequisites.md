@@ -2,7 +2,7 @@
 
 This guide walks you through every Azure resource needed for the Microsoft + Snowflake hands-on lab. It is written for someone **new to Microsoft Azure** — every click is documented.
 
-**Time to complete:** Plan for 30–45 minutes to set up everything.
+**Time to complete:** Plan for 45–60 minutes to set up everything.
 
 ---
 
@@ -12,6 +12,12 @@ This guide walks you through every Azure resource needed for the Microsoft + Sno
 2. [Create a Resource Group](#2-create-a-resource-group)
 3. [Find Your Microsoft Entra ID Tenant ID](#3-find-your-microsoft-entra-id-tenant-id)
 4. [Create a Storage Account (ADLS Gen2)](#4-create-a-storage-account-adls-gen2)
+   - [4a. Create the Storage Account](#4a-create-the-storage-account)
+   - [4b. Create a Container](#4b-create-a-container)
+   - [4c. Grant Snowflake Access (Blob)](#4c-grant-snowflake-access-to-the-storage-account-after-snowflake-setup)
+   - [4d. Create a Storage Queue](#4d-create-a-storage-queue-for-snowpipe-auto-ingest)
+   - [4e. Set Up Event Grid Subscription](#4e-set-up-event-grid-subscription-blob-created--queue)
+   - [4f. Grant Snowpipe Access to Queue](#4f-grant-snowpipe-integration-access-to-the-queue-after-snowflake-setup)
 5. [Create a Microsoft Fabric Workspace and Lakehouse](#5-create-a-microsoft-fabric-workspace-and-lakehouse)
 6. [Register an Entra ID Application (for Fabric Integration)](#6-register-an-entra-id-application-for-fabric-integration)
 7. [Set Up Azure AI Foundry (Hub, Project, Model)](#7-set-up-azure-ai-foundry-hub-project-model)
@@ -103,7 +109,7 @@ Your Tenant ID is needed by multiple Snowflake integrations (storage integration
 Azure Data Lake Storage Gen2 (ADLS Gen2) is a cloud storage service for big data analytics. Snowflake uses it via a storage integration for external stages and data access.
 
 **Used by:**
-- `01_setup/01_account_setup.sql` — Storage integration (`AZURE_STORAGE_INT`)
+- `01_setup/01_account_setup.sql` — Storage integration (`AZURE_STORAGE_INT`), external stage (`RAW.ADLS_DATA_STAGE`), Snowpipe notification integration (`AZURE_SNOWPIPE_INT`)
 
 ### 4a. Create the Storage Account
 
@@ -174,6 +180,70 @@ This step happens **after** you run `01_setup/01_account_setup.sql` in Snowflake
 9. Click **Review + assign** → **Review + assign** again
 
 > **What this does:** Granting `Storage Blob Data Contributor` lets Snowflake read and write files in your ADLS Gen2 storage account.
+
+### 4d. Create a Storage Queue (for Snowpipe Auto-Ingest)
+
+Snowpipe monitors a **Storage Queue** to know when new files arrive in ADLS. Azure sends queue messages automatically via Event Grid. This enables Snowpipe's `AUTO_INGEST = TRUE` mode — no manual triggers needed.
+
+1. You should still be on your storage account page. In the left menu, scroll down to **Queues** (under "Data storage") and click it
+2. Click **+ Queue** (top bar)
+3. Name: `snowpipe-events`
+4. Click **OK**
+
+> **Record this value:**
+> - **Queue name:** `snowpipe-events`
+> - This replaces `<your_queue>` in `01_account_setup.sql`
+
+### 4e. Set Up Event Grid Subscription (Blob Created → Queue)
+
+Event Grid watches your storage account and automatically sends a message to the queue every time a new file (blob) is created. This is what triggers Snowpipe.
+
+1. Go back to your **storage account** page
+2. In the left menu, click **Events** (you may need to scroll — it's under the "Monitoring" or top section)
+3. Click **+ Event Subscription** (top bar)
+4. Fill in the form:
+
+| Field | What to Enter |
+|---|---|
+| **Name** | `snowpipe-blob-created` |
+| **Event Schema** | `Event Grid Schema` (default) |
+| **System Topic Name** | `snowflake-storage-topic` (auto-fills or type this) |
+| **Filter to Event Types** | Uncheck everything, then check only **Blob Created** |
+| **Endpoint Type** | `Storage Queue` |
+
+5. Click **Select an endpoint** (next to Endpoint Type)
+   - **Subscription:** your subscription
+   - **Storage account:** your storage account (`snowflakedemostore`)
+   - **Queue:** `snowpipe-events` (the queue you just created)
+   - Click **Confirm Selection**
+6. Click **Create**
+
+> **What this does:** Every time a file is uploaded to your storage account, Azure automatically sends a notification message to the `snowpipe-events` queue. Snowpipe polls that queue and loads the new file.
+
+### 4f. Grant Snowpipe Integration Access to the Queue (After Snowflake Setup)
+
+This step happens **after** you run `01_setup/01_account_setup.sql` in Snowflake and create `AZURE_SNOWPIPE_INT`. Come back here once you have the service principal name.
+
+1. In Snowflake (Snowsight), run:
+   ```sql
+   DESC NOTIFICATION INTEGRATION AZURE_SNOWPIPE_INT;
+   ```
+2. Find the row `AZURE_MULTI_TENANT_APP_NAME` — copy the service principal name
+   (It looks like `Snowflake_SFCRole_xxxxxxx`)
+3. Go back to your **storage account** in Azure Portal
+4. In the left menu, click **Access Control (IAM)**
+5. Click **+ Add** → **Add role assignment**
+6. On the **Role** tab:
+   - Search for `Storage Queue Data Contributor`
+   - Select it and click **Next**
+7. On the **Members** tab:
+   - Click **+ Select members**
+   - Paste the `AZURE_MULTI_TENANT_APP_NAME` value
+   - Select the Snowflake service principal
+   - Click **Select**
+8. Click **Review + assign** → **Review + assign** again
+
+> **What this does:** `Storage Queue Data Contributor` lets Snowflake's notification integration read and delete messages from the queue. Without this, Snowpipe cannot receive the "new file" notifications.
 
 ---
 
@@ -424,19 +494,21 @@ Copy this table and fill in your values. Every `<placeholder>` in the lab script
 
 | # | Value | Your Value | Where to Find It | Used In (Script File) |
 |---|---|---|---|---|
-| 1 | **Azure Tenant ID** | `________________` | Section 3 (Entra ID → Overview) | `01_account_setup.sql` (storage integration, external volume) |
-| 2 | **Storage Account Name** | `________________` | Section 4a (storage account creation) | `01_account_setup.sql` |
-| 3 | **Storage Container Name** | `snowflake-data` | Section 4b (container creation) | `01_account_setup.sql` (STORAGE_ALLOWED_LOCATIONS) |
-| 4 | **Snowflake Service Principal** | `________________` | Run `DESC STORAGE INTEGRATION AZURE_STORAGE_INT;` in Snowflake → `AZURE_MULTI_TENANT_APP_NAME` | Section 4c (IAM role grants) |
-| 5 | **Fabric Workspace ID** | `________________` | Section 5b (workspace URL) | `01_account_setup.sql` (external volume), `03_catalog_integration_onelake.sql` |
-| 6 | **Fabric Lakehouse ID** | `________________` | Section 5c (lakehouse URL) | `03_catalog_integration_onelake.sql` (catalog namespace) |
-| 7 | **Entra App Client ID** | `________________` | Section 6a (app registration Overview) | `03_catalog_integration_onelake.sql` (catalog integration) |
-| 8 | **Entra App Client Secret** | `________________` | Section 6b (client secret creation) | `03_catalog_integration_onelake.sql` (catalog integration) |
-| 9 | **Snowflake Account Identifier** | `________________` | Snowsight → Admin → Accounts → `<org>-<account>` | Fabric connection, MCP server URL |
-| 10 | **AI Foundry Model Deployment** | `________________` | Section 7c (model deployment) | `01_foundry_agent_setup.md` (agent model selection) |
-| 11 | **Snowflake PAT** | `________________` | Snowsight → Profile → Preferences → Authentication → Generate PAT | `01_foundry_agent_setup.md` (MCP connection token) |
+| 1 | **Azure Tenant ID** | `________________` | Section 3 (Entra ID → Overview) | `01_account_setup.sql` (storage integration, notification integration, external volume) |
+| 2 | **Storage Account Name** | `________________` | Section 4a (storage account creation) | `01_account_setup.sql` (ADLS stage URL, notification integration queue URI) |
+| 3 | **Storage Container Name** | `snowflake-data` | Section 4b (container creation) | `01_account_setup.sql` (ADLS stage URL) |
+| 4 | **Snowflake Storage Service Principal** | `________________` | Run `DESC STORAGE INTEGRATION AZURE_STORAGE_INT;` → `AZURE_MULTI_TENANT_APP_NAME` | Section 4c (Storage Blob Data Contributor IAM grant) |
+| 5 | **Storage Queue Name** | `snowpipe-events` | Section 4d (queue creation) | `01_account_setup.sql` (notification integration queue URI) |
+| 6 | **Snowpipe Service Principal** | `________________` | Run `DESC NOTIFICATION INTEGRATION AZURE_SNOWPIPE_INT;` → `AZURE_MULTI_TENANT_APP_NAME` | Section 4f (Storage Queue Data Contributor IAM grant) |
+| 7 | **Fabric Workspace ID** | `________________` | Section 5b (workspace URL) | `01_account_setup.sql` (external volume), `03_catalog_integration_onelake.sql` |
+| 8 | **Fabric Lakehouse ID** | `________________` | Section 5c (lakehouse URL) | `03_catalog_integration_onelake.sql` (catalog namespace) |
+| 9 | **Entra App Client ID** | `________________` | Section 6a (app registration Overview) | `03_catalog_integration_onelake.sql` (catalog integration) |
+| 10 | **Entra App Client Secret** | `________________` | Section 6b (client secret creation) | `03_catalog_integration_onelake.sql` (catalog integration) |
+| 11 | **Snowflake Account Identifier** | `________________` | Snowsight → Admin → Accounts → `<org>-<account>` | Fabric connection, MCP server URL |
+| 12 | **AI Foundry Model Deployment** | `________________` | Section 7c (model deployment) | `01_foundry_agent_setup.md` (agent model selection) |
+| 13 | **Snowflake PAT** | `________________` | Snowsight → Profile → Preferences → Authentication → Generate PAT | `01_foundry_agent_setup.md` (MCP connection token) |
 
-> **Security note:** Values #8 and #11 are secrets. Do not commit them to source control or share them in plain text.
+> **Security note:** Values #10 and #13 are secrets. Do not commit them to source control or share them in plain text.
 
 ---
 
