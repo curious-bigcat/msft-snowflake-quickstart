@@ -202,25 +202,51 @@ CREATE OR REPLACE NOTIFICATION INTEGRATION AZURE_SNOWPIPE_INT
 GRANT USAGE ON INTEGRATION AZURE_SNOWPIPE_INT TO ROLE DEMO_ADMIN;
 
 -- =============================================================================
--- 6. EXTERNAL VOLUME FOR ONELAKE / FABRIC
+-- 6. EXTERNAL VOLUMES FOR ONELAKE / FABRIC
 -- =============================================================================
--- This enables writing Iceberg tables to Microsoft Fabric OneLake
+-- Two external volumes are needed for bidirectional access:
+--   ONELAKE_EXTERNAL_VOL  — write Iceberg tables from Snowflake → OneLake Files area
+--   ONELAKE_READ_VOL      — read Fabric-managed tables from OneLake Tables area
 
+-- WRITE volume: points to the Files area of the Fabric Lakehouse
+-- Snowflake writes Iceberg metadata + Parquet files here.
+-- URL pattern: azure://onelake.dfs.fabric.microsoft.com/<workspace_id>/<lakehouse_id>/Files/
 CREATE OR REPLACE EXTERNAL VOLUME ONELAKE_EXTERNAL_VOL
   STORAGE_LOCATIONS = (
     (
-      NAME = 'onelake_vol'
+      NAME = 'onelake_write_vol'
       STORAGE_PROVIDER = 'AZURE'
-      STORAGE_BASE_URL = 'azure://onelake.dfs.fabric.microsoft.com/<your_workspace_id>/.SnowflakeDatabase/SnowflakeVolume/'
+      STORAGE_BASE_URL = 'azure://onelake.dfs.fabric.microsoft.com/<your_workspace_id>/<your_lakehouse_id>/Files/snowflake-iceberg/'
       AZURE_TENANT_ID = '<your_azure_tenant_id>'
     )
   );
 
--- Run this to get consent URL and service principal:
+-- Run DESC to get the consent URL and Snowflake service principal name:
 -- DESC EXTERNAL VOLUME ONELAKE_EXTERNAL_VOL;
--- Grant the service principal as Contributor in your Fabric workspace.
+-- Open AZURE_CONSENT_URL in a browser → accept the prompt.
+-- Then in Fabric: workspace → Manage access → add AZURE_MULTI_TENANT_APP_NAME → Contributor.
 
 GRANT USAGE ON EXTERNAL VOLUME ONELAKE_EXTERNAL_VOL TO ROLE DEMO_ADMIN;
+
+-- READ volume: points to the Tables area of the Fabric Lakehouse
+-- Snowflake reads Delta/Iceberg tables managed by Fabric.
+-- ALLOW_WRITES = FALSE prevents accidental writes to Fabric-managed data.
+-- URL pattern: azure://onelake.dfs.fabric.microsoft.com/<workspace_id>/<lakehouse_id>/Tables/
+CREATE OR REPLACE EXTERNAL VOLUME ONELAKE_READ_VOL
+  STORAGE_LOCATIONS = (
+    (
+      NAME = 'onelake_read_vol'
+      STORAGE_PROVIDER = 'AZURE'
+      STORAGE_BASE_URL = 'azure://onelake.dfs.fabric.microsoft.com/<your_workspace_id>/<your_lakehouse_id>/Tables/'
+      AZURE_TENANT_ID = '<your_azure_tenant_id>'
+    )
+  )
+  ALLOW_WRITES = FALSE;
+
+-- DESC to get consent URL (same Snowflake app, same consent — only needed once):
+-- DESC EXTERNAL VOLUME ONELAKE_READ_VOL;
+
+GRANT USAGE ON EXTERNAL VOLUME ONELAKE_READ_VOL TO ROLE DEMO_ADMIN;
 
 -- =============================================================================
 -- 7. CROSS-REGION INFERENCE

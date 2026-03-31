@@ -251,8 +251,10 @@ This step happens **after** you run `01_setup/01_account_setup.sql` in Snowflake
 
 Microsoft Fabric is an all-in-one analytics platform. We use its OneLake storage for bidirectional Iceberg table sharing with Snowflake.
 
+> **Region requirement:** Your Fabric capacity must be in the **same Azure region** as your Snowflake account. Check your Snowflake region in the bottom-left account menu (e.g., `Azure East US 2`). When creating the Fabric workspace below, select a capacity in that same region. If they differ, Iceberg writes will fail.
+
 **Used by:**
-- `01_setup/01_account_setup.sql` — External volume (`ONELAKE_EXTERNAL_VOL`)
+- `01_setup/01_account_setup.sql` — External volumes (`ONELAKE_EXTERNAL_VOL`, `ONELAKE_READ_VOL`)
 - `07_fabric_integration/01_external_volume_onelake.sql` — External volume validation
 - `07_fabric_integration/02_iceberg_tables_to_fabric.sql` — Writing Iceberg tables to OneLake
 - `07_fabric_integration/03_catalog_integration_onelake.sql` — Reading Fabric tables from Snowflake
@@ -500,15 +502,15 @@ Copy this table and fill in your values. Every `<placeholder>` in the lab script
 | 4 | **Snowflake Storage Service Principal** | `________________` | Run `DESC STORAGE INTEGRATION AZURE_STORAGE_INT;` → `AZURE_MULTI_TENANT_APP_NAME` | Section 4c (Storage Blob Data Contributor IAM grant) |
 | 5 | **Storage Queue Name** | `snowpipe-events` | Section 4d (queue creation) | `01_account_setup.sql` (notification integration queue URI) |
 | 6 | **Snowpipe Service Principal** | `________________` | Run `DESC NOTIFICATION INTEGRATION AZURE_SNOWPIPE_INT;` → `AZURE_MULTI_TENANT_APP_NAME` | Section 4f (Storage Queue Data Contributor IAM grant) |
-| 7 | **Fabric Workspace ID** | `________________` | Section 5b (workspace URL) | `01_account_setup.sql` (external volume), `03_catalog_integration_onelake.sql` |
-| 8 | **Fabric Lakehouse ID** | `________________` | Section 5c (lakehouse URL) | `03_catalog_integration_onelake.sql` (catalog namespace) |
-| 9 | **Entra App Client ID** | `________________` | Section 6a (app registration Overview) | `03_catalog_integration_onelake.sql` (catalog integration) |
-| 10 | **Entra App Client Secret** | `________________` | Section 6b (client secret creation) | `03_catalog_integration_onelake.sql` (catalog integration) |
+| 7 | **Fabric Workspace ID** | `________________` | Section 5b (workspace URL) | `01_account_setup.sql` (external volumes write + read) |
+| 8 | **Fabric Lakehouse ID** | `________________` | Section 5c (lakehouse URL) | `01_account_setup.sql` (external volumes write + read) |
+| 9 | **Entra App Client ID** | `________________` | Section 6a — **not needed for Iceberg** | Not used in current lab scripts |
+| 10 | **Entra App Client Secret** | `________________` | Section 6b — **not needed for Iceberg** | Not used in current lab scripts |
 | 11 | **Snowflake Account Identifier** | `________________` | Snowsight → Admin → Accounts → `<org>-<account>` | Fabric connection, MCP server URL |
 | 12 | **AI Foundry Model Deployment** | `________________` | Section 7c (model deployment) | `01_foundry_agent_setup.md` (agent model selection) |
 | 13 | **Snowflake PAT** | `________________` | Snowsight → Profile → Preferences → Authentication → Generate PAT | `01_foundry_agent_setup.md` (MCP connection token) |
 
-> **Security note:** Values #10 and #13 are secrets. Do not commit them to source control or share them in plain text.
+> **Security note:** Value #13 is a secret. Do not commit it to source control or share it in plain text.
 
 ---
 

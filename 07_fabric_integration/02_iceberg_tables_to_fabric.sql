@@ -201,20 +201,32 @@ GRANT SELECT ON ALL TABLES IN SCHEMA ICEBERG TO ROLE DEMO_ADMIN;
 GRANT SELECT ON ALL TABLES IN SCHEMA ICEBERG TO ROLE DEMO_ANALYST;
 
 -- =============================================================================
--- 9. FABRIC ACCESS INSTRUCTIONS
+-- 9. MAKE TABLES VISIBLE IN FABRIC (Required: OneLake Shortcut)
 -- =============================================================================
--- Once the Iceberg tables are created and data is written to OneLake:
+-- The Iceberg tables are now written to OneLake's Files area. To surface them
+-- as proper Lakehouse Tables in Fabric (Power BI, Spark, SQL Endpoint), you
+-- MUST create a OneLake shortcut in the Lakehouse Tables section.
 --
--- In Microsoft Fabric:
---   1. Open your Fabric workspace
---   2. Navigate to Lakehouse → Tables
---   3. The Iceberg tables should appear as external tables
---   4. You can query them via:
---      - Fabric Lakehouse SQL Endpoint
---      - Fabric Spark Notebooks
---      - Power BI (DirectLake mode)
+-- Without the shortcut, the data exists in Files but Fabric does NOT
+-- automatically treat it as a queryable Lakehouse table.
 --
--- The tables are stored as open Parquet files + Iceberg metadata,
--- so Fabric reads them without any Snowflake connector dependency.
+-- Steps in Microsoft Fabric Portal (app.fabric.microsoft.com):
+--   1. Open your Fabric workspace → open demo_lakehouse
+--   2. In the Tables panel (left side), click "..." → New shortcut
+--   3. Select OneLake as the source
+--   4. Navigate to: Files → snowflake-iceberg → <table_folder>
+--      e.g., Files/snowflake-iceberg/customer_360/
+--   5. Click Next → confirm the name → Create shortcut
+--   6. Repeat for each table:
+--      - customer_360      → Files/snowflake-iceberg/customer_360/
+--      - sales_summary     → Files/snowflake-iceberg/sales_summary/
+--      - product_performance → Files/snowflake-iceberg/product_performance/
+--      - ml_predictions    → Files/snowflake-iceberg/ml_predictions/
+--
+-- After creating shortcuts, tables appear in the Lakehouse Tables section
+-- and are immediately queryable via:
+--   - Fabric SQL Endpoint (T-SQL)
+--   - Fabric Spark Notebooks (PySpark)
+--   - Power BI DirectLake mode (no data import, reads directly from OneLake)
 
-SELECT 'Iceberg tables created. Data is now accessible from Microsoft Fabric.' AS STATUS;
+SELECT 'Iceberg tables created. Create OneLake shortcuts in Fabric to surface them as Lakehouse tables.' AS STATUS;

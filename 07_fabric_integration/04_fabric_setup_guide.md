@@ -9,10 +9,10 @@ This guide covers the Microsoft Fabric configuration needed for bidirectional da
 │     SNOWFLAKE       │                    │   MICROSOFT FABRIC  │
 │                     │                    │                     │
 │  Iceberg Tables     │ ──── OneLake ────▶ │  Lakehouse Tables   │
-│  (write to OneLake) │                    │  (read from OneLake)│
+│  (write to Files/)  │                    │  (via shortcut)     │
 │                     │                    │                     │
-│  Catalog-Linked DB  │ ◀── OneLake ────── │  Lakehouse Tables   │
-│  (read from OneLake)│                    │  (write to OneLake) │
+│  Iceberg Tables     │ ◀── OneLake ────── │  Delta/Iceberg      │
+│  (METADATA_FILE_PATH│                    │  Tables (Tables/)   │
 └─────────────────────┘                    └─────────────────────┘
                           Apache Iceberg
                          (Open Table Format)
@@ -27,9 +27,12 @@ Both platforms read/write the same Parquet + Iceberg metadata files in OneLake. 
 | Requirement | Details |
 |---|---|
 | Microsoft Fabric capacity | F2 or higher (trial works for testing) |
+| Azure region match | Fabric capacity **must be in the same Azure region** as your Snowflake account. Check: bottom-left of Snowflake UI shows the Azure region. |
 | Azure subscription | With Microsoft Entra ID |
 | Snowflake account | Enterprise edition or higher |
 | Snowflake role | ACCOUNTADMIN (for integration setup) |
+
+> **Region check:** In Snowflake, go to the bottom-left account menu — it shows the cloud provider and region (e.g., `Azure East US 2`). Your Fabric capacity must be in the same region. If they differ, create a new Fabric capacity in the matching region before proceeding.
 
 ---
 
@@ -38,7 +41,7 @@ Both platforms read/write the same Parquet + Iceberg metadata files in OneLake. 
 1. Go to [Microsoft Fabric](https://app.fabric.microsoft.com)
 2. Click **Workspaces** → **New workspace**
 3. Name: `snowflake-demo-workspace`
-4. Select a Fabric capacity (F2+ or Trial)
+4. Select a Fabric capacity (F2+ or Trial) — **confirm it matches your Snowflake Azure region**
 5. Click **Create**
 
 **Record the Workspace ID:**
@@ -54,76 +57,48 @@ Both platforms read/write the same Parquet + Iceberg metadata files in OneLake. 
 3. Click **Create**
 
 **Record the Lakehouse ID:**
-- Open lakehouse Settings → About → copy the GUID
-- This is needed for the catalog namespace in Snowflake
+- Open lakehouse → click the "..." → Settings
+- Copy the GUID from the URL: `.../lakehouses/<lakehouse_id>/...`
+- This is needed for both external volume URLs
 
 ---
 
-## Step 3: Configure Entra ID Application
+## Step 3: Grant Snowflake Service Principal Access
 
-Snowflake needs an Entra ID (Azure AD) app registration to authenticate with OneLake.
+When Snowflake creates an external volume, it registers a service principal in Entra ID. You must grant this principal access to your Fabric workspace.
 
-### 3a. Create App Registration
-
-1. Go to [Azure Portal](https://portal.azure.com) → **Microsoft Entra ID** → **App registrations**
-2. Click **New registration**
-3. Name: `snowflake-fabric-integration`
-4. Supported account types: **Single tenant**
-5. Click **Register**
-
-### 3b. Create Client Secret
-
-1. In the app registration, go to **Certificates & secrets**
-2. Click **New client secret**
-3. Description: `snowflake-access`
-4. Expiry: 12 months
-5. **Copy the secret value immediately** (shown only once)
-
-### 3c. Record Values
-
-| Value | Where to Find |
-|---|---|
-| Tenant ID | Entra ID → Overview |
-| Client ID | App Registration → Overview → Application (client) ID |
-| Client Secret | Created in step 3b |
-
-### 3d. Grant OneLake Permissions
-
-1. Go to your **Fabric workspace** → **Manage access**
-2. Click **Add people or groups**
-3. Search for `snowflake-fabric-integration` (the app registration name)
-4. Assign **Contributor** role
-5. Click **Add**
-
----
-
-## Step 4: Grant Snowflake Service Principal Access
-
-When Snowflake creates an external volume, it generates its own service principal.
-
-1. In Snowflake, run:
+1. In Snowflake (Snowsight), run:
    ```sql
    DESC EXTERNAL VOLUME ONELAKE_EXTERNAL_VOL;
    ```
-2. Copy the `AZURE_CONSENT_URL` value
-3. Open it in a browser and **Accept** the consent prompt
-4. Go to your Fabric workspace → **Manage access**
-5. Add the Snowflake service principal (from `AZURE_MULTI_TENANT_APP_NAME`)
-6. Assign **Contributor** role
+2. From the output, copy:
+   - **`AZURE_CONSENT_URL`** — the application consent link
+   - **`AZURE_MULTI_TENANT_APP_NAME`** — the Snowflake service principal name
+3. Open the `AZURE_CONSENT_URL` in a browser tab → click **Accept**
+   (You may be redirected to the Snowflake homepage — that is expected)
+4. In Fabric Portal, open your workspace (`snowflake-demo-workspace`)
+5. Click **Manage access** (top-right of the workspace)
+6. Click **Add people or groups**
+7. Paste the `AZURE_MULTI_TENANT_APP_NAME` value into the search box
+8. Select the Snowflake service principal → assign **Contributor** role → click **Add**
+
+> **What this does:** `Contributor` lets Snowflake read and write files in any lakehouse in this workspace. The consent URL registers the Snowflake multi-tenant app in your Entra ID tenant — this is a standard OAuth app consent flow, not an IAM assignment.
 
 ---
 
-## Step 5: Create Sample Data in Fabric
+## Step 4: Create Sample Data in Fabric
 
-Create some tables in the Fabric Lakehouse for Snowflake to read.
+Create Fabric-managed tables that Snowflake will read back via the read external volume.
 
-### Using Fabric Notebook (PySpark):
+### Using a Fabric Notebook (PySpark):
+
+1. In the workspace, click **New** → **Notebook**
+2. Attach the notebook to `demo_lakehouse`
+3. Paste and run the following:
 
 ```python
 # In a Fabric Spark Notebook
 from pyspark.sql.types import *
-from pyspark.sql import functions as F
-from datetime import datetime, timedelta
 import random
 
 # Sample: Regional sales targets from Fabric
@@ -151,11 +126,9 @@ for year in [2024, 2025]:
             ))
 
 df = spark.createDataFrame(data, schema)
-
-# Write as Delta table to Lakehouse (auto-converts to Iceberg for OneLake)
 df.write.format("delta").mode("overwrite").saveAsTable("regional_sales_targets")
 
-# Sample: Marketing campaign data from Fabric
+# Sample: Marketing campaign data
 campaign_schema = StructType([
     StructField("campaign_id", IntegerType(), False),
     StructField("campaign_name", StringType(), False),
@@ -182,20 +155,44 @@ campaign_df.write.format("delta").mode("overwrite").saveAsTable("marketing_campa
 print("Fabric sample data created.")
 ```
 
+OneLake automatically generates Iceberg metadata alongside the Delta files. Snowflake reads this metadata via `METADATA_FILE_PATH` in `03_catalog_integration_onelake.sql`.
+
+---
+
+## Step 5: Create OneLake Shortcuts (Required for Fabric to See Snowflake Tables)
+
+After running `02_iceberg_tables_to_fabric.sql`, Snowflake has written Iceberg files to the `Files/snowflake-iceberg/` folder in OneLake. To surface them as proper Lakehouse Tables in Fabric, you must create **OneLake shortcuts**.
+
+> **Why shortcuts?** Fabric does not automatically scan the Files area for Iceberg tables. A shortcut explicitly maps a folder in Files to a table in the Tables section.
+
+For each Snowflake Iceberg table:
+
+1. Open `demo_lakehouse` in Fabric
+2. In the **Tables** panel (left side), click **...** → **New shortcut**
+3. Select **OneLake** as the source
+4. Navigate to: `Files` → `snowflake-iceberg` → select the table folder
+5. Click **Next** → confirm the name → **Create shortcut**
+
+Repeat for each table:
+
+| Shortcut Name | Source Path |
+|---|---|
+| `customer_360` | `Files/snowflake-iceberg/customer_360/` |
+| `sales_summary` | `Files/snowflake-iceberg/sales_summary/` |
+| `product_performance` | `Files/snowflake-iceberg/product_performance/` |
+| `ml_predictions` | `Files/snowflake-iceberg/ml_predictions/` |
+
+After creating shortcuts, tables appear in the Lakehouse Tables section and are queryable via Fabric SQL Endpoint, Spark Notebooks, and Power BI DirectLake mode.
+
 ---
 
 ## Step 6: Verify Bidirectional Access
 
 ### Snowflake → Fabric (verify in Fabric)
 
-1. Open **demo_lakehouse** in Fabric
-2. Go to **Tables** section
-3. Look for Iceberg tables created by Snowflake:
-   - `customer_360`
-   - `sales_summary`
-   - `product_performance`
-   - `ml_predictions`
-4. Query via **SQL Endpoint**:
+1. Open **demo_lakehouse** → **Tables** section
+2. The shortcut tables should appear: `customer_360`, `sales_summary`, `product_performance`, `ml_predictions`
+3. Query via **SQL Endpoint**:
    ```sql
    SELECT TOP 10 * FROM customer_360;
    SELECT region, SUM(net_revenue) AS total_revenue
@@ -207,13 +204,8 @@ print("Fabric sample data created.")
 ### Fabric → Snowflake (verify in Snowflake)
 
 ```sql
--- In Snowflake, after catalog-linked database is set up:
-USE DATABASE FABRIC_DATA;
-SHOW SCHEMAS;
-SHOW TABLES;
-
--- Query Fabric data
-SELECT * FROM FABRIC_DATA.<schema>.regional_sales_targets LIMIT 10;
+-- After running 03_catalog_integration_onelake.sql:
+SELECT * FROM MSFT_SNOWFLAKE_DEMO.ICEBERG.FABRIC_REGIONAL_TARGETS LIMIT 10;
 
 -- Join Fabric targets with Snowflake actuals
 SELECT
@@ -222,7 +214,7 @@ SELECT
     t.target_revenue,
     s.NET_REVENUE AS actual_revenue,
     ROUND((s.NET_REVENUE / t.target_revenue) * 100, 2) AS attainment_pct
-FROM FABRIC_DATA.<schema>.regional_sales_targets t
+FROM MSFT_SNOWFLAKE_DEMO.ICEBERG.FABRIC_REGIONAL_TARGETS t
 JOIN MSFT_SNOWFLAKE_DEMO.ANALYTICS.DT_SALES_SUMMARY s
     ON t.region = s.REGION
 WHERE t.year = 2024;
@@ -236,7 +228,7 @@ WHERE t.year = 2024;
 
 1. Open **Power BI** in your Fabric workspace
 2. Click **New** → **Semantic Model (default)**
-3. Select the Lakehouse containing Snowflake Iceberg tables
+3. Select the Lakehouse containing the shortcut tables
 4. Choose tables: `customer_360`, `sales_summary`, `product_performance`
 5. Power BI reads directly from OneLake (no import needed)
 
@@ -258,12 +250,13 @@ SUMMARIZECOLUMNS(
 
 | Issue | Solution |
 |---|---|
-| Tables not appearing in Fabric | Check external volume connectivity: `SELECT SYSTEM$VERIFY_EXTERNAL_VOLUME('ONELAKE_EXTERNAL_VOL');` |
-| Catalog-linked DB shows no tables | Verify Entra app has Contributor on workspace; check `DESCRIBE CATALOG INTEGRATION` |
-| "Access denied" reading Fabric data | Ensure Entra app client ID/secret are correct and scopes include `storage.azure.com` |
-| Stale data in Snowflake | Run `ALTER DATABASE FABRIC_DATA REFRESH;` or wait for auto-refresh |
-| Stale data in Fabric | Run `ALTER ICEBERG TABLE ... REFRESH;` in Snowflake |
-| OneLake path not found | Verify workspace ID and lakehouse ID in external volume URL |
+| Tables not appearing in Fabric Tables section | OneLake shortcuts not created — follow Step 5 above |
+| `SYSTEM$VERIFY_EXTERNAL_VOLUME` fails | Consent URL not accepted, or Snowflake service principal not assigned Contributor in Fabric workspace → redo Step 3 |
+| Iceberg table read fails in Snowflake | `METADATA_FILE_PATH` is outdated — run `ALTER ICEBERG TABLE ... REFRESH '<new_metadata_file>'` |
+| "Storage location not found" | Workspace ID or Lakehouse ID in external volume URL is wrong — verify from the Fabric lakehouse URL |
+| Stale data in Snowflake | Fabric wrote new data → find new metadata file in OneLake and run `ALTER ICEBERG TABLE ... REFRESH` |
+| Stale data in Fabric | Run `ALTER ICEBERG TABLE ... REFRESH;` in Snowflake, then the shortcut reflects latest data |
+| Region mismatch error | Fabric capacity and Snowflake account must be in the same Azure region |
 
 ---
 
@@ -271,10 +264,9 @@ SUMMARIZECOLUMNS(
 
 | Parameter | Where to Get | Used In |
 |---|---|---|
-| `<workspace_id>` | Fabric workspace URL | External Volume, Catalog Integration |
-| `<lakehouse_id>` | Fabric lakehouse URL | Catalog namespace |
-| `<azure_tenant_id>` | Entra ID → Overview | External Volume, Catalog Integration |
-| `<entra_app_client_id>` | App Registration → Overview | Catalog Integration |
-| `<entra_app_client_secret>` | App Registration → Secrets | Catalog Integration |
-| `AZURE_CONSENT_URL` | `DESC EXTERNAL VOLUME` output | Browser consent flow |
-| `AZURE_MULTI_TENANT_APP_NAME` | `DESC EXTERNAL VOLUME` output | Fabric workspace access |
+| `<workspace_id>` | Fabric workspace URL | External volumes, `01_account_setup.sql` |
+| `<lakehouse_id>` | Fabric lakehouse URL | External volumes, `01_account_setup.sql` |
+| `<azure_tenant_id>` | Entra ID → Overview | External volumes |
+| `AZURE_CONSENT_URL` | `DESC EXTERNAL VOLUME ONELAKE_EXTERNAL_VOL` output | Browser consent flow (Step 3) |
+| `AZURE_MULTI_TENANT_APP_NAME` | `DESC EXTERNAL VOLUME ONELAKE_EXTERNAL_VOL` output | Fabric workspace Manage Access (Step 3) |
+| `<metadata_file_path>` | Fabric lakehouse → Tables → browse metadata/ folder | `03_catalog_integration_onelake.sql` |
