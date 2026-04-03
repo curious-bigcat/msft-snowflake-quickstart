@@ -177,7 +177,21 @@ GRANT USAGE ON INTEGRATION AZURE_SNOWPIPE_INT TO ROLE DEMO_ADMIN;
 
 USE SCHEMA MSFT_SNOWFLAKE_DEMO.BRONZE;
 
--- STEP 0D-1 [SQL]: Create the external stage.
+-- STEP 0D-1 [SQL]: Create the CSV file format used by Snowpipe COPY INTO statements.
+CREATE OR REPLACE FILE FORMAT MSFT_SNOWFLAKE_DEMO.BRONZE.CSV_FORMAT
+  TYPE = 'CSV'
+  FIELD_DELIMITER = ','
+  SKIP_HEADER = 1
+  FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+  NULL_IF = ('', 'NULL', 'null')
+  EMPTY_FIELD_AS_NULL = TRUE
+  TRIM_SPACE = TRUE
+  ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE
+  COMMENT = 'Standard CSV format for Snowpipe ingestion';
+
+GRANT USAGE ON FILE FORMAT MSFT_SNOWFLAKE_DEMO.BRONZE.CSV_FORMAT TO ROLE DEMO_ADMIN;
+
+-- STEP 0D-2 [SQL]: Create the external stage.
 --   URL must use azure:// and point to the root of your container.
 CREATE OR REPLACE STAGE BRONZE.ADLS_DATA_STAGE
   URL = 'azure://<your_storage_account>.blob.core.windows.net/snowflake-data/'
@@ -188,7 +202,7 @@ CREATE OR REPLACE STAGE BRONZE.ADLS_DATA_STAGE
 
 GRANT USAGE ON STAGE BRONZE.ADLS_DATA_STAGE TO ROLE DEMO_ADMIN;
 
--- STEP 0D-2 [SQL]: Verify stage connectivity.
+-- STEP 0D-3 [SQL]: Verify stage connectivity.
 --   A successful LIST (even returning 0 files) confirms the storage integration
 --   and IAM role assignment are working correctly.
 USE ROLE DEMO_ADMIN;
@@ -271,7 +285,7 @@ FROM (
            METADATA$FILENAME
     FROM @BRONZE.ADLS_DATA_STAGE/csv/regional_sales_targets/
 )
-FILE_FORMAT = BRONZE.CSV_FORMAT;
+FILE_FORMAT = MSFT_SNOWFLAKE_DEMO.BRONZE.CSV_FORMAT;
 
 CREATE OR REPLACE PIPE BRONZE.CSV_MARKETING_PIPE
   AUTO_INGEST = TRUE
@@ -290,7 +304,7 @@ FROM (
            METADATA$FILENAME
     FROM @BRONZE.ADLS_DATA_STAGE/csv/marketing_campaigns/
 )
-FILE_FORMAT = BRONZE.CSV_FORMAT;
+FILE_FORMAT = MSFT_SNOWFLAKE_DEMO.BRONZE.CSV_FORMAT;
 
 CREATE OR REPLACE PIPE BRONZE.CSV_STORE_LOCATIONS_PIPE
   AUTO_INGEST = TRUE
@@ -307,7 +321,7 @@ FROM (
            METADATA$FILENAME
     FROM @BRONZE.ADLS_DATA_STAGE/csv/store_locations/
 )
-FILE_FORMAT = BRONZE.CSV_FORMAT;
+FILE_FORMAT = MSFT_SNOWFLAKE_DEMO.BRONZE.CSV_FORMAT;
 
 -- Get notification channel URL — register with Azure Event Grid
 SHOW PIPES IN SCHEMA BRONZE;
