@@ -102,7 +102,7 @@ See [`01_setup/02_azure_prerequisites.md`](01_setup/02_azure_prerequisites.md) f
 | File | Description |
 |---|---|
 | [`03_silver/01_silver_processing.sql`](03_silver/01_silver_processing.sql) | Part 1: `SILVER.DT_ORDERS_CLEANED` (validation, quality flags) → `SILVER.DT_ORDERS_ENRICHED` (customer join, value tiers). Part 2: CDC streams on BRONZE tables, SCD Type 2 via MERGE, Task DAG writing to GOLD |
-| [`03_silver/03_snowpark_processing.ipynb`](03_silver/03_snowpark_processing.ipynb) | Snowpark: window functions, Python UDF registration, sentiment scoring, writes to GOLD |
+| [`04_gold/02_snowpark_processing.ipynb`](04_gold/02_snowpark_processing.ipynb) | Snowpark: window functions, Python UDF registration, sentiment scoring, writes to GOLD |
 
 **Key patterns:** Dynamic Tables with `DOWNSTREAM` lag, Streams for CDC, Task DAGs (all tasks in SILVER schema), Snowpark DataFrame API, permanent Python UDFs stored in `@ML.ML_MODELS`.
 
@@ -137,7 +137,7 @@ See [`01_setup/02_azure_prerequisites.md`](01_setup/02_azure_prerequisites.md) f
 | 4 | `02_bronze/02_adls_ingestion.sql` | DEMO_ADMIN | Upload `sample_data/*.csv` to ADLS first, then Snowsight |
 | 5 | `02_bronze/03_fabric_integration.sql` (Section A or B, then C) | DEMO_ADMIN / ACCOUNTADMIN | Section A: synthetic data to OneLake. Section B: real Fabric tables. Section C: write-back. A and B are mutually exclusive. |
 | 6 | `03_silver/01_silver_processing.sql` | DEMO_ADMIN | Snowsight SQL Worksheet |
-| 7 | `03_silver/03_snowpark_processing.ipynb` | DEMO_ADMIN | Snowflake Workspace Notebook |
+| 7 | `04_gold/02_snowpark_processing.ipynb` | DEMO_ADMIN | Snowflake Workspace Notebook |
 | 8 | `04_gold/01_dynamic_tables_and_views.sql` | DEMO_ADMIN | Snowsight SQL Worksheet |
 | 9 | `04_gold/02_ml_models/01_ticket_priority_classifier.ipynb` | DEMO_ML_ENGINEER | Snowflake Workspace Notebook (DEMO_ML_WH) |
 | 10 | `04_gold/02_ml_models/02_revenue_predictor.ipynb` | DEMO_ML_ENGINEER | Snowflake Workspace Notebook (DEMO_ML_WH) |
