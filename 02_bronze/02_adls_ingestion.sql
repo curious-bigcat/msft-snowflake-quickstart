@@ -2,11 +2,15 @@
 -- MEDALLION ARCHITECTURE: BRONZE Layer — ADLS CSV Ingestion
 -- =============================================================================
 -- Ingests CSV files from Azure Data Lake Storage Gen2 into Bronze tables.
--- Uses external stage + Snowpipe auto-ingest via Azure Event Grid notifications.
+-- Uses BRONZE.ADLS_DATA_STAGE (created in 01_setup/01_account_setup.sql) and
+-- Snowpipe auto-ingest via Azure Event Grid notifications.
 --
 -- Prerequisites:
---   - 01_setup/01_account_setup.sql (AZURE_STORAGE_INT, AZURE_SNOWPIPE_INT created)
---   - ADLS container: snowflake-data/csv/
+--   - 01_setup/01_account_setup.sql (ADLS_DATA_STAGE, AZURE_STORAGE_INT,
+--     AZURE_SNOWPIPE_INT already created)
+--   - Upload CSV files to ADLS under: snowflake-data/csv/
+--       regional_sales_targets/ → regional_sales_targets.csv
+--       marketing_campaigns/    → marketing_campaigns.csv
 --   - Azure Event Grid subscription routing blob events to storage queue
 -- =============================================================================
 
@@ -15,21 +19,11 @@ USE WAREHOUSE DEMO_WH;
 USE DATABASE MSFT_SNOWFLAKE_DEMO;
 USE SCHEMA BRONZE;
 
--- =============================================================================
--- 1. EXTERNAL STAGE — ADLS CSV Container
--- =============================================================================
-
-CREATE OR REPLACE STAGE BRONZE.ADLS_CSV_STAGE
-  STORAGE_INTEGRATION = AZURE_STORAGE_INT
-  URL = 'azure://<storage_account>.blob.core.windows.net/snowflake-data/csv/'
-  FILE_FORMAT = BRONZE.CSV_FORMAT
-  COMMENT = 'External stage pointing to ADLS Gen2 CSV drop zone';
-
--- Verify stage connectivity
-LIST @BRONZE.ADLS_CSV_STAGE;
+-- Verify stage connectivity (stage created in 01_setup/01_account_setup.sql)
+LIST @BRONZE.ADLS_DATA_STAGE/csv/;
 
 -- =============================================================================
--- 2. TARGET BRONZE TABLES
+-- 1. TARGET BRONZE TABLES
 -- =============================================================================
 
 -- Regional sales targets loaded from Fabric / planning tools as CSV exports
@@ -66,7 +60,7 @@ CREATE OR REPLACE TABLE BRONZE.MARKETING_CAMPAIGNS (
 COMMENT = 'Marketing campaign metadata — loaded from ADLS CSV exports';
 
 -- =============================================================================
--- 3. COPY INTO — Manual / Scheduled Bulk Load
+-- 2. COPY INTO — Manual / Scheduled Bulk Load
 -- =============================================================================
 
 -- Load regional sales targets
@@ -79,7 +73,7 @@ FROM (
         $1, $2, $3::NUMBER(4), $4::NUMBER(1),
         $5::NUMBER(14,2), $6::NUMBER, $7::NUMBER,
         METADATA$FILENAME
-    FROM @BRONZE.ADLS_CSV_STAGE/regional_sales_targets/
+    FROM @BRONZE.ADLS_DATA_STAGE/csv/regional_sales_targets/
 )
 FILE_FORMAT = BRONZE.CSV_FORMAT
 ON_ERROR = 'CONTINUE'
@@ -97,14 +91,14 @@ FROM (
         $6, $7::NUMBER(12,2), $8::NUMBER(12,2),
         $9::NUMBER, $10::NUMBER, $11::NUMBER,
         METADATA$FILENAME
-    FROM @BRONZE.ADLS_CSV_STAGE/marketing_campaigns/
+    FROM @BRONZE.ADLS_DATA_STAGE/csv/marketing_campaigns/
 )
 FILE_FORMAT = BRONZE.CSV_FORMAT
 ON_ERROR = 'CONTINUE'
 PURGE = FALSE;
 
 -- =============================================================================
--- 4. SNOWPIPE — Auto-Ingest on New File Arrival
+-- 3. SNOWPIPE — Auto-Ingest on New File Arrival
 -- =============================================================================
 
 -- Pipe for regional sales targets (triggered by Azure Event Grid → Storage Queue)
@@ -121,7 +115,7 @@ FROM (
     SELECT $1, $2, $3::NUMBER(4), $4::NUMBER(1),
            $5::NUMBER(14,2), $6::NUMBER, $7::NUMBER,
            METADATA$FILENAME
-    FROM @BRONZE.ADLS_CSV_STAGE/regional_sales_targets/
+    FROM @BRONZE.ADLS_DATA_STAGE/csv/regional_sales_targets/
 )
 FILE_FORMAT = BRONZE.CSV_FORMAT;
 
@@ -141,17 +135,17 @@ FROM (
            $6, $7::NUMBER(12,2), $8::NUMBER(12,2),
            $9::NUMBER, $10::NUMBER, $11::NUMBER,
            METADATA$FILENAME
-    FROM @BRONZE.ADLS_CSV_STAGE/marketing_campaigns/
+    FROM @BRONZE.ADLS_DATA_STAGE/csv/marketing_campaigns/
 )
 FILE_FORMAT = BRONZE.CSV_FORMAT;
 
--- Get the notification channel ARN/URL to register with Azure Event Grid
+-- Get the notification channel URL to register with Azure Event Grid
 SHOW PIPES IN SCHEMA BRONZE;
 SELECT SYSTEM$PIPE_FORCE_RESUME('BRONZE.CSV_REGIONAL_TARGETS_PIPE');
 SELECT SYSTEM$PIPE_FORCE_RESUME('BRONZE.CSV_MARKETING_PIPE');
 
 -- =============================================================================
--- 5. MONITORING
+-- 4. MONITORING
 -- =============================================================================
 
 -- Check pipe status
