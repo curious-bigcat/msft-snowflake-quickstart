@@ -1,0 +1,21 @@
+STORE_ID,STORE_NAME,REGION,CITY,STATE,COUNTRY,STORE_TYPE,OPEN_DATE,IS_ACTIVE
+STR-001,New York Flagship,North America,New York,NY,United States,Flagship,2018-03-15,TRUE
+STR-002,Los Angeles Standard,North America,Los Angeles,CA,United States,Standard,2019-06-01,TRUE
+STR-003,Chicago Standard,North America,Chicago,IL,United States,Standard,2019-09-10,TRUE
+STR-004,Houston Outlet,North America,Houston,TX,United States,Outlet,2020-02-20,TRUE
+STR-005,Toronto Standard,North America,Toronto,ON,Canada,Standard,2020-07-05,TRUE
+STR-006,London Flagship,EMEA,London,,United Kingdom,Flagship,2017-11-01,TRUE
+STR-007,Berlin Standard,EMEA,Berlin,,Germany,Standard,2021-03-22,TRUE
+STR-008,Paris Outlet,EMEA,Paris,,France,Outlet,2021-08-14,TRUE
+STR-009,Amsterdam Standard,EMEA,Amsterdam,,Netherlands,Standard,2022-01-10,TRUE
+STR-010,Dubai Flagship,EMEA,Dubai,,UAE,Flagship,2022-05-18,TRUE
+STR-011,Sydney Flagship,APAC,Sydney,NSW,Australia,Flagship,2019-04-07,TRUE
+STR-012,Melbourne Standard,APAC,Melbourne,VIC,Australia,Standard,2020-10-15,TRUE
+STR-013,Singapore Flagship,APAC,Singapore,,Singapore,Flagship,2018-08-09,TRUE
+STR-014,Tokyo Standard,APAC,Tokyo,,Japan,Standard,2021-11-30,TRUE
+STR-015,Mumbai Standard,APAC,Mumbai,,India,Standard,2022-09-01,TRUE
+STR-016,Sao Paulo Standard,LATAM,Sao Paulo,,Brazil,Standard,2021-06-20,TRUE
+STR-017,Mexico City Outlet,LATAM,Mexico City,,Mexico,Outlet,2022-03-12,TRUE
+STR-018,Auckland Standard,ANZ,Auckland,,New Zealand,Standard,2023-01-15,TRUE
+STR-019,Dallas Outlet,North America,Dallas,TX,United States,Outlet,2023-04-01,FALSE
+STR-020,Seattle Online Hub,North America,Seattle,WA,United States,Online,2020-01-01,TRUE
