@@ -1,19 +1,15 @@
 -- =============================================================================
 -- MEDALLION ARCHITECTURE: BRONZE Layer — Fabric OneLake Integration
 -- =============================================================================
--- Three-section file covering the full Fabric <-> Snowflake data exchange:
+-- Two-section file covering the full Fabric <-> Snowflake data exchange:
 --
---   SECTION A -- DEMO/DEV seed: writes synthetic data to OneLake as Iceberg
---               (run this when no real Fabric pipeline exists yet)
+--   SECTION A -- Seed synthetic data to OneLake as Snowflake-managed Iceberg
+--               (FABRIC_CLICKSTREAM_EVENTS, FABRIC_IOT_EVENTS,
+--                FABRIC_REGIONAL_TARGETS, FABRIC_MARKETING_CAMPAIGNS)
 --
---   SECTION B -- PRODUCTION catalog: points Snowflake at real Fabric-managed tables
---               (run this when Fabric Lakehouse tables exist in OneLake)
---
---   NOTE: Sections A and B both CREATE OR REPLACE BRONZE.FABRIC_* tables.
---         They are mutually exclusive -- run ONE of the two, not both.
---
---   SECTION C -- Write-back: exports all BRONZE raw tables to OneLake as Iceberg
---               (run after either A or B; independent of A vs B choice)
+--   SECTION B -- Write-back: exports all BRONZE raw tables to OneLake as Iceberg
+--               (ICEBERG.RAW_* tables readable by Fabric Spark, SQL Endpoint,
+--                Power BI DirectLake)
 --
 -- Prerequisites: Run 01_setup/01_account_setup.sql first (volumes + integrations).
 -- =============================================================================
@@ -25,8 +21,7 @@
 -- Iceberg tables. Data physically lives in OneLake (Files/snowflake-iceberg/fabric/).
 -- BRONZE.FABRIC_* tables are backed by OneLake storage -- no fallback, no copies.
 --
--- Run this section when no real Fabric pipeline exists yet.
--- Skip and run Section B when real Fabric Lakehouse tables exist.
+-- Run this section to seed synthetic data into OneLake.
 --
 -- Prerequisites:
 --   - ONELAKE_EXTERNAL_VOL created and validated (01_setup/01_account_setup.sql)
@@ -339,107 +334,12 @@ SELECT SYSTEM$GET_ICEBERG_TABLE_INFORMATION('BRONZE.FABRIC_MARKETING_CAMPAIGNS')
 SELECT 'Section A complete -- synthetic Fabric data written to OneLake as Iceberg.' AS STATUS;
 
 -- =============================================================================
--- SECTION B: PRODUCTION CATALOG INTEGRATION  [PRODUCTION — OPTIONAL]
--- =============================================================================
--- USE THIS SECTION ONLY when you have real Fabric-native tables in OneLake
--- (tables created and owned by Fabric/Delta, not seeded by Section A).
---
--- !! SKIP THIS ENTIRE SECTION IF YOU RAN SECTION A !!
--- Section A creates BRONZE.FABRIC_* as Snowflake-managed Iceberg tables and
--- they are already fully accessible. The catalog integration below is not
--- needed for those tables — it is only required to read tables that Fabric
--- itself wrote to OneLake (e.g. via Dataflows, Spark, or Lakehouse ingestion).
---
--- Why the catalog integration is needed here (but not in Section A):
---   Section A: CATALOG = 'SNOWFLAKE' — Snowflake owns the metadata, no extra
---              integration required.
---   Section B: CATALOG = FABRIC_ONELAKE_CATALOG_INT — Fabric owns the metadata.
---              Snowflake needs CATALOG_SOURCE = OBJECT_STORE to read an external
---              .metadata.json file it did not create.
---
--- Before running the CREATE TABLE statements below:
---   1. In Fabric portal: Lakehouse -> <table> -> Properties -> copy the ABFS path
---   2. Browse to the metadata/ subfolder and note the latest .metadata.json filename
---   3. The METADATA_FILE_PATH is relative to ONELAKE_READ_VOL base URL (Tables/)
---      e.g. 'clickstream_events/metadata/00001-abc123def456.metadata.json'
---   4. Replace each <replace-with-actual-uuid> below with the real filename
---   5. Uncomment and run each CREATE TABLE statement individually
--- =============================================================================
-
-USE ROLE ACCOUNTADMIN;
-USE WAREHOUSE DEMO_WH;
-USE DATABASE MSFT_SNOWFLAKE_DEMO;
-
-CREATE OR REPLACE CATALOG INTEGRATION FABRIC_ONELAKE_CATALOG_INT
-  CATALOG_SOURCE = OBJECT_STORE
-  TABLE_FORMAT   = ICEBERG
-  ENABLED        = TRUE
-  COMMENT = 'Reads Iceberg metadata from Fabric-native OneLake tables (OBJECT_STORE catalog)';
-
-DESCRIBE CATALOG INTEGRATION FABRIC_ONELAKE_CATALOG_INT;
-GRANT USAGE ON INTEGRATION FABRIC_ONELAKE_CATALOG_INT TO ROLE DEMO_ADMIN;
-
-USE ROLE DEMO_ADMIN;
-USE SCHEMA BRONZE;
-
--- Uncomment each block only after replacing <replace-with-actual-uuid> with the
--- real metadata filename from the Fabric portal.
-
--- CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS
---   EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
---   CATALOG            = FABRIC_ONELAKE_CATALOG_INT
---   METADATA_FILE_PATH = 'clickstream_events/metadata/<replace-with-actual-uuid>.metadata.json'
---   COMMENT = 'Clickstream events from Fabric Real-Time Intelligence -- zero-copy via OneLake';
-
--- CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_IOT_EVENTS
---   EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
---   CATALOG            = FABRIC_ONELAKE_CATALOG_INT
---   METADATA_FILE_PATH = 'iot_events/metadata/<replace-with-actual-uuid>.metadata.json'
---   COMMENT = 'IoT sensor events from Fabric Real-Time Intelligence -- zero-copy via OneLake';
-
--- CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_REGIONAL_TARGETS
---   EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
---   CATALOG            = FABRIC_ONELAKE_CATALOG_INT
---   METADATA_FILE_PATH = 'regional_sales_targets/metadata/<replace-with-actual-uuid>.metadata.json'
---   COMMENT = 'Regional sales targets from Fabric Lakehouse -- zero-copy via OneLake';
-
--- CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS
---   EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
---   CATALOG            = FABRIC_ONELAKE_CATALOG_INT
---   METADATA_FILE_PATH = 'marketing_campaigns/metadata/<replace-with-actual-uuid>.metadata.json'
---   COMMENT = 'Marketing campaigns from Fabric Lakehouse -- zero-copy via OneLake';
-
--- GRANT SELECT ON TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS    TO ROLE DEMO_ADMIN;
--- GRANT SELECT ON TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS    TO ROLE DEMO_ANALYST;
--- GRANT SELECT ON TABLE BRONZE.FABRIC_IOT_EVENTS            TO ROLE DEMO_ADMIN;
--- GRANT SELECT ON TABLE BRONZE.FABRIC_IOT_EVENTS            TO ROLE DEMO_ANALYST;
--- GRANT SELECT ON TABLE BRONZE.FABRIC_REGIONAL_TARGETS      TO ROLE DEMO_ADMIN;
--- GRANT SELECT ON TABLE BRONZE.FABRIC_REGIONAL_TARGETS      TO ROLE DEMO_ANALYST;
--- GRANT SELECT ON TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS   TO ROLE DEMO_ADMIN;
--- GRANT SELECT ON TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS   TO ROLE DEMO_ANALYST;
-
--- SHOW ICEBERG TABLES IN SCHEMA BRONZE;
-
--- SELECT * FROM BRONZE.FABRIC_CLICKSTREAM_EVENTS  LIMIT 5;
--- SELECT * FROM BRONZE.FABRIC_IOT_EVENTS           LIMIT 5;
--- SELECT * FROM BRONZE.FABRIC_REGIONAL_TARGETS     LIMIT 5;
--- SELECT * FROM BRONZE.FABRIC_MARKETING_CAMPAIGNS  LIMIT 5;
-
--- Refresh after Fabric writes new data:
--- ALTER ICEBERG TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS   REFRESH 'clickstream_events/metadata/<new-uuid>.metadata.json';
--- ALTER ICEBERG TABLE BRONZE.FABRIC_IOT_EVENTS           REFRESH 'iot_events/metadata/<new-uuid>.metadata.json';
--- ALTER ICEBERG TABLE BRONZE.FABRIC_REGIONAL_TARGETS     REFRESH 'regional_sales_targets/metadata/<new-uuid>.metadata.json';
--- ALTER ICEBERG TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS  REFRESH 'marketing_campaigns/metadata/<new-uuid>.metadata.json';
-
-SELECT 'Section B ready -- uncomment and run CREATE TABLE blocks after substituting real metadata paths.' AS STATUS;
-
--- =============================================================================
--- SECTION C: WRITE BRONZE RAW TABLES BACK TO FABRIC  [BOTH PATHS]
+-- SECTION B: WRITE BRONZE RAW TABLES BACK TO FABRIC
 -- =============================================================================
 -- Exports all BRONZE raw tables to OneLake as Snowflake-managed Iceberg in ICEBERG schema.
 -- Makes data available to Fabric (Spark, SQL Endpoint, Power BI DirectLake).
 --
--- Run after either Section A or Section B.
+-- Run after Section A.
 -- Prerequisites: BRONZE tables populated (02_bronze/01_tables_and_data.sql).
 -- =============================================================================
 
