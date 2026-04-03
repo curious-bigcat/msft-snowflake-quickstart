@@ -7,9 +7,8 @@
 --               (FABRIC_CLICKSTREAM_EVENTS, FABRIC_IOT_EVENTS,
 --                FABRIC_REGIONAL_TARGETS, FABRIC_MARKETING_CAMPAIGNS)
 --
---   SECTION B -- Write-back: exports all BRONZE raw tables to OneLake as Iceberg
---               (ICEBERG.RAW_* tables readable by Fabric Spark, SQL Endpoint,
---                Power BI DirectLake)
+--   SECTION C -- Incremental data: inserts additional rows to verify that
+--               Fabric Delta shortcuts reflect new OneLake writes automatically
 --
 -- Prerequisites: Run 01_setup/01_account_setup.sql first (volumes + integrations).
 -- =============================================================================
@@ -328,117 +327,109 @@ SELECT SYSTEM$GET_ICEBERG_TABLE_INFORMATION('BRONZE.FABRIC_MARKETING_CAMPAIGNS')
 SELECT 'Section A complete -- synthetic Fabric data written to OneLake as Iceberg.' AS STATUS;
 
 -- =============================================================================
--- SECTION B: WRITE BRONZE RAW TABLES BACK TO FABRIC
+-- SECTION C: INCREMENTAL DATA — TEST CHANGE REFLECTION IN FABRIC
 -- =============================================================================
--- Exports all BRONZE raw tables to OneLake as Snowflake-managed Iceberg in ICEBERG schema.
--- Makes data available to Fabric (Spark, SQL Endpoint, Power BI DirectLake).
+-- Inserts additional rows into existing Iceberg tables to verify that Fabric
+-- Delta shortcuts automatically reflect new data written to OneLake.
 --
 -- Run after Section A.
--- Prerequisites: BRONZE tables populated (02_bronze/01_tables_and_data.sql).
+-- After running: query the shortcut tables in a Fabric Lakehouse SQL endpoint
+-- or Spark notebook — row counts should match the AFTER values below.
 -- =============================================================================
 
 USE ROLE DEMO_ADMIN;
 USE WAREHOUSE DEMO_WH;
 USE DATABASE MSFT_SNOWFLAKE_DEMO;
-USE SCHEMA ICEBERG;
 
-CREATE OR REPLACE ICEBERG TABLE ICEBERG.RAW_CUSTOMERS_ICEBERG
-  CATALOG         = 'SNOWFLAKE'
-  EXTERNAL_VOLUME = 'ONELAKE_EXTERNAL_VOL'
-  BASE_LOCATION   = 'raw/customers/'
-  COMMENT = 'Raw customer master data -- Bronze synthetic data exported to Fabric'
-AS
-SELECT CUSTOMER_ID, FIRST_NAME, LAST_NAME, EMAIL, PHONE,
-       ADDRESS, CITY, STATE, COUNTRY, POSTAL_CODE,
-       CUSTOMER_SEGMENT, REGISTRATION_DATE, IS_ACTIVE,
-       CURRENT_TIMESTAMP() AS EXPORTED_AT
-FROM BRONZE.CUSTOMERS;
+-- Row counts before increment
+SELECT 'BEFORE' AS PHASE, 'FABRIC_CLICKSTREAM_EVENTS' AS TABLE_NAME, COUNT(*) AS ROW_COUNT FROM BRONZE.FABRIC_CLICKSTREAM_EVENTS
+UNION ALL SELECT 'BEFORE', 'FABRIC_IOT_EVENTS', COUNT(*) FROM BRONZE.FABRIC_IOT_EVENTS;
 
-CREATE OR REPLACE ICEBERG TABLE ICEBERG.RAW_PRODUCTS_ICEBERG
-  CATALOG         = 'SNOWFLAKE'
-  EXTERNAL_VOLUME = 'ONELAKE_EXTERNAL_VOL'
-  BASE_LOCATION   = 'raw/products/'
-  COMMENT = 'Raw product catalog -- Bronze synthetic data exported to Fabric'
-AS
-SELECT PRODUCT_ID, PRODUCT_NAME, CATEGORY, SUB_CATEGORY,
-       BRAND, SKU, UNIT_PRICE, COST_PRICE, IS_ACTIVE,
-       CURRENT_TIMESTAMP() AS EXPORTED_AT
-FROM BRONZE.PRODUCTS;
+-- -----------------------------------------------------------------------------
+-- C1. New clickstream events — BRONZE.FABRIC_CLICKSTREAM_EVENTS (Section A table)
+-- Snowflake-managed Iceberg: writes new Parquet files to OneLake immediately.
+-- -----------------------------------------------------------------------------
+USE SCHEMA BRONZE;
 
-CREATE OR REPLACE ICEBERG TABLE ICEBERG.RAW_ORDERS_ICEBERG
-  CATALOG         = 'SNOWFLAKE'
-  EXTERNAL_VOLUME = 'ONELAKE_EXTERNAL_VOL'
-  BASE_LOCATION   = 'raw/orders/'
-  COMMENT = 'Raw orders -- Bronze synthetic data exported to Fabric'
-AS
-SELECT ORDER_ID, CUSTOMER_ID, ORDER_DATE, ORDER_STATUS,
-       TOTAL_AMOUNT, DISCOUNT_AMOUNT, SHIPPING_AMOUNT,
-       PAYMENT_METHOD, REGION, CHANNEL, SOURCE_SYSTEM,
-       CURRENT_TIMESTAMP() AS EXPORTED_AT
-FROM BRONZE.ORDERS;
+INSERT INTO BRONZE.FABRIC_CLICKSTREAM_EVENTS (
+    EVENT_ID, SESSION_ID, USER_ID, PAGE_URL, EVENT_TYPE,
+    REFERRER_SOURCE, DEVICE_TYPE, BROWSER, COUNTRY, PRODUCT_ID,
+    SESSION_DURATION_SEC, EVENT_TIMESTAMP
+)
+SELECT
+    UUID_STRING(),
+    'SES-INC-' || LPAD(UNIFORM(1, 5000, RANDOM())::VARCHAR, 8, '0'),
+    CASE WHEN UNIFORM(1,10,RANDOM()) > 2 THEN UNIFORM(1, 10000, RANDOM()) ELSE NULL END,
+    ARRAY_CONSTRUCT('/home','/products','/cart','/checkout','/deals')
+        [UNIFORM(0, 4, RANDOM())]::VARCHAR,
+    ARRAY_CONSTRUCT('page_view','click','add_to_cart','purchase','search')
+        [UNIFORM(0, 4, RANDOM())]::VARCHAR,
+    ARRAY_CONSTRUCT('organic','paid_search','email','social','direct')
+        [UNIFORM(0, 4, RANDOM())]::VARCHAR,
+    ARRAY_CONSTRUCT('mobile','desktop','tablet')[UNIFORM(0, 2, RANDOM())]::VARCHAR,
+    ARRAY_CONSTRUCT('Chrome','Safari','Firefox','Edge')[UNIFORM(0, 3, RANDOM())]::VARCHAR,
+    ARRAY_CONSTRUCT('United States','United Kingdom','Germany','Australia','Canada')
+        [UNIFORM(0, 4, RANDOM())]::VARCHAR,
+    CASE WHEN UNIFORM(1,10,RANDOM()) > 4 THEN UNIFORM(1, 5000, RANDOM()) ELSE NULL END,
+    CASE WHEN UNIFORM(1,10,RANDOM()) = 1 THEN UNIFORM(30, 1200, RANDOM()) ELSE NULL END,
+    DATEADD('second', -UNIFORM(0, 3600, RANDOM()), CURRENT_TIMESTAMP())
+FROM TABLE(GENERATOR(ROWCOUNT => 1000));
 
-CREATE OR REPLACE ICEBERG TABLE ICEBERG.RAW_ORDER_ITEMS_ICEBERG
-  CATALOG         = 'SNOWFLAKE'
-  EXTERNAL_VOLUME = 'ONELAKE_EXTERNAL_VOL'
-  BASE_LOCATION   = 'raw/order_items/'
-  COMMENT = 'Raw order line items -- Bronze synthetic data exported to Fabric'
-AS
-SELECT ORDER_ITEM_ID, ORDER_ID, PRODUCT_ID, QUANTITY,
-       UNIT_PRICE, DISCOUNT_PCT, LINE_TOTAL,
-       CURRENT_TIMESTAMP() AS EXPORTED_AT
-FROM BRONZE.ORDER_ITEMS;
+-- -----------------------------------------------------------------------------
+-- C2. New IoT events — BRONZE.FABRIC_IOT_EVENTS (Section A table)
+-- -----------------------------------------------------------------------------
 
-CREATE OR REPLACE ICEBERG TABLE ICEBERG.RAW_PRODUCT_REVIEWS_ICEBERG
-  CATALOG         = 'SNOWFLAKE'
-  EXTERNAL_VOLUME = 'ONELAKE_EXTERNAL_VOL'
-  BASE_LOCATION   = 'raw/product_reviews/'
-  COMMENT = 'Raw product reviews -- Bronze synthetic data exported to Fabric'
-AS
-SELECT REVIEW_ID, PRODUCT_ID, CUSTOMER_ID, RATING,
-       REVIEW_TEXT, REVIEW_DATE, HELPFUL_VOTES,
-       CURRENT_TIMESTAMP() AS EXPORTED_AT
-FROM BRONZE.PRODUCT_REVIEWS;
+INSERT INTO BRONZE.FABRIC_IOT_EVENTS (
+    EVENT_ID, DEVICE_ID, DEVICE_TYPE, SENSOR_VALUE,
+    UNIT, WAREHOUSE_ID, LOCATION_ZONE, ALERT_TRIGGERED, EVENT_TIMESTAMP
+)
+WITH e AS (
+    SELECT
+        UUID_STRING() AS EVENT_ID,
+        'DEV-INC-' || LPAD(UNIFORM(1, 200, RANDOM())::VARCHAR, 5, '0') AS DEVICE_ID,
+        ARRAY_CONSTRUCT('temperature','humidity','pressure','motion','vibration')
+            [UNIFORM(0, 4, RANDOM())]::VARCHAR AS DEVICE_TYPE,
+        ARRAY_CONSTRUCT('WH-NORTH','WH-SOUTH','WH-EAST','WH-WEST')
+            [UNIFORM(0, 3, RANDOM())]::VARCHAR AS WAREHOUSE_ID,
+        ARRAY_CONSTRUCT('Zone A - Receiving','Zone B - Storage','Zone C - Picking','Zone D - Packing')
+            [UNIFORM(0, 3, RANDOM())]::VARCHAR AS LOCATION_ZONE
+    FROM TABLE(GENERATOR(ROWCOUNT => 500))
+)
+SELECT
+    EVENT_ID, DEVICE_ID, DEVICE_TYPE,
+    ROUND(CASE DEVICE_TYPE
+        WHEN 'temperature' THEN UNIFORM(15, 35, RANDOM()) + RANDOM()
+        WHEN 'humidity'    THEN UNIFORM(30, 90, RANDOM()) + RANDOM()
+        WHEN 'pressure'    THEN UNIFORM(980, 1030, RANDOM()) + RANDOM()
+        WHEN 'motion'      THEN UNIFORM(0, 1, RANDOM())
+        WHEN 'vibration'   THEN UNIFORM(0, 50, RANDOM()) + RANDOM()
+        ELSE UNIFORM(0, 100, RANDOM()) + RANDOM()
+    END, 2) AS SENSOR_VALUE,
+    CASE DEVICE_TYPE
+        WHEN 'temperature' THEN 'celsius'
+        WHEN 'humidity'    THEN 'percent'
+        WHEN 'pressure'    THEN 'hPa'
+        WHEN 'motion'      THEN 'boolean'
+        WHEN 'vibration'   THEN 'mm/s'
+        ELSE 'unit'
+    END AS UNIT,
+    WAREHOUSE_ID, LOCATION_ZONE,
+    CASE
+        WHEN DEVICE_TYPE = 'temperature' AND SENSOR_VALUE > 32 THEN TRUE
+        WHEN DEVICE_TYPE = 'humidity'    AND SENSOR_VALUE > 80 THEN TRUE
+        WHEN DEVICE_TYPE = 'vibration'   AND SENSOR_VALUE > 40 THEN TRUE
+        ELSE FALSE
+    END AS ALERT_TRIGGERED,
+    DATEADD('second', -UNIFORM(0, 3600, RANDOM()), CURRENT_TIMESTAMP())
+FROM e;
 
-CREATE OR REPLACE ICEBERG TABLE ICEBERG.RAW_SUPPORT_TICKETS_ICEBERG
-  CATALOG         = 'SNOWFLAKE'
-  EXTERNAL_VOLUME = 'ONELAKE_EXTERNAL_VOL'
-  BASE_LOCATION   = 'raw/support_tickets/'
-  COMMENT = 'Raw support tickets -- Bronze synthetic data exported to Fabric'
-AS
-SELECT TICKET_ID, CUSTOMER_ID, PRODUCT_ID, TICKET_SUBJECT, TICKET_DESCRIPTION,
-       PRIORITY, STATUS, CATEGORY, RESOLUTION_TIME_HOURS, SATISFACTION_SCORE,
-       CREATED_AT, RESOLVED_AT, CURRENT_TIMESTAMP() AS EXPORTED_AT
-FROM BRONZE.SUPPORT_TICKETS;
+-- Row counts after increment — confirm increase
+SELECT 'AFTER' AS PHASE, 'FABRIC_CLICKSTREAM_EVENTS' AS TABLE_NAME, COUNT(*) AS ROW_COUNT FROM BRONZE.FABRIC_CLICKSTREAM_EVENTS
+UNION ALL SELECT 'AFTER', 'FABRIC_IOT_EVENTS', COUNT(*) FROM BRONZE.FABRIC_IOT_EVENTS;
 
-GRANT SELECT ON TABLE ICEBERG.RAW_CUSTOMERS_ICEBERG       TO ROLE DEMO_ADMIN;
-GRANT SELECT ON TABLE ICEBERG.RAW_CUSTOMERS_ICEBERG       TO ROLE DEMO_ANALYST;
-GRANT SELECT ON TABLE ICEBERG.RAW_PRODUCTS_ICEBERG        TO ROLE DEMO_ADMIN;
-GRANT SELECT ON TABLE ICEBERG.RAW_PRODUCTS_ICEBERG        TO ROLE DEMO_ANALYST;
-GRANT SELECT ON TABLE ICEBERG.RAW_ORDERS_ICEBERG          TO ROLE DEMO_ADMIN;
-GRANT SELECT ON TABLE ICEBERG.RAW_ORDERS_ICEBERG          TO ROLE DEMO_ANALYST;
-GRANT SELECT ON TABLE ICEBERG.RAW_ORDER_ITEMS_ICEBERG     TO ROLE DEMO_ADMIN;
-GRANT SELECT ON TABLE ICEBERG.RAW_ORDER_ITEMS_ICEBERG     TO ROLE DEMO_ANALYST;
-GRANT SELECT ON TABLE ICEBERG.RAW_PRODUCT_REVIEWS_ICEBERG TO ROLE DEMO_ADMIN;
-GRANT SELECT ON TABLE ICEBERG.RAW_PRODUCT_REVIEWS_ICEBERG TO ROLE DEMO_ANALYST;
-GRANT SELECT ON TABLE ICEBERG.RAW_SUPPORT_TICKETS_ICEBERG TO ROLE DEMO_ADMIN;
-GRANT SELECT ON TABLE ICEBERG.RAW_SUPPORT_TICKETS_ICEBERG TO ROLE DEMO_ANALYST;
+-- Verify in Fabric (Lakehouse SQL endpoint or Spark notebook):
+--   SELECT COUNT(*) FROM clickstream_events;  -- should match AFTER FABRIC_CLICKSTREAM_EVENTS
+--   SELECT COUNT(*) FROM iot_events;          -- should match AFTER FABRIC_IOT_EVENTS
 
-SHOW ICEBERG TABLES IN SCHEMA ICEBERG;
-
-SELECT 'RAW_CUSTOMERS_ICEBERG'       AS TABLE_NAME, COUNT(*) AS ROW_COUNT FROM ICEBERG.RAW_CUSTOMERS_ICEBERG
-UNION ALL SELECT 'RAW_PRODUCTS_ICEBERG',       COUNT(*) FROM ICEBERG.RAW_PRODUCTS_ICEBERG
-UNION ALL SELECT 'RAW_ORDERS_ICEBERG',         COUNT(*) FROM ICEBERG.RAW_ORDERS_ICEBERG
-UNION ALL SELECT 'RAW_ORDER_ITEMS_ICEBERG',    COUNT(*) FROM ICEBERG.RAW_ORDER_ITEMS_ICEBERG
-UNION ALL SELECT 'RAW_PRODUCT_REVIEWS_ICEBERG',COUNT(*) FROM ICEBERG.RAW_PRODUCT_REVIEWS_ICEBERG
-UNION ALL SELECT 'RAW_SUPPORT_TICKETS_ICEBERG',COUNT(*) FROM ICEBERG.RAW_SUPPORT_TICKETS_ICEBERG;
-
--- Surface in Fabric via OneLake shortcuts:
---   raw_customers       -> Files/snowflake-iceberg/raw/customers/
---   raw_products        -> Files/snowflake-iceberg/raw/products/
---   raw_orders          -> Files/snowflake-iceberg/raw/orders/
---   raw_order_items     -> Files/snowflake-iceberg/raw/order_items/
---   raw_product_reviews -> Files/snowflake-iceberg/raw/product_reviews/
---   raw_support_tickets -> Files/snowflake-iceberg/raw/support_tickets/
-
-SELECT 'Section B complete -- Bronze raw data written to Fabric OneLake as Iceberg.' AS STATUS;
+SELECT 'Section C complete -- incremental data written; verify counts in Fabric.' AS STATUS;
 
