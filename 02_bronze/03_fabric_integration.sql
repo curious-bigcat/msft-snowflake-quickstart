@@ -47,15 +47,15 @@ USE SCHEMA BRONZE;
 CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS (
     EVENT_ID             STRING   NOT NULL,
     SESSION_ID           STRING   NOT NULL,
-    USER_ID              NUMBER                  COMMENT 'NULL for anonymous sessions',
+    USER_ID              BIGINT                  COMMENT 'NULL for anonymous sessions',
     PAGE_URL             STRING,
     EVENT_TYPE           STRING             COMMENT 'page_view, click, add_to_cart, purchase, search, wishlist',
     REFERRER_SOURCE      STRING            COMMENT 'organic, paid_search, email, social, direct, affiliate',
     DEVICE_TYPE          STRING             COMMENT 'mobile, desktop, tablet',
     BROWSER              STRING,
     COUNTRY              STRING,
-    PRODUCT_ID           NUMBER                  COMMENT 'Populated for product-related events',
-    SESSION_DURATION_SEC NUMBER                  COMMENT 'Set on session_end events only',
+    PRODUCT_ID           BIGINT                  COMMENT 'Populated for product-related events',
+    SESSION_DURATION_SEC BIGINT                  COMMENT 'Set on session_end events only',
     EVENT_TIMESTAMP      TIMESTAMP_NTZ NOT NULL
 )
   CATALOG         = 'SNOWFLAKE'
@@ -184,11 +184,11 @@ FROM devices;
 CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_REGIONAL_TARGETS (
     REGION          STRING  NOT NULL,
     CHANNEL         STRING  NOT NULL,
-    FISCAL_YEAR     NUMBER(4)    NOT NULL,
-    FISCAL_QUARTER  NUMBER(1)    NOT NULL,
+    FISCAL_YEAR     NUMBER(4, 0)  NOT NULL,
+    FISCAL_QUARTER  NUMBER(1, 0)  NOT NULL,
     REVENUE_TARGET  NUMBER(14,2) NOT NULL,
-    ORDER_TARGET    NUMBER       NOT NULL,
-    CUSTOMER_TARGET NUMBER       NOT NULL
+    ORDER_TARGET    BIGINT       NOT NULL,
+    CUSTOMER_TARGET BIGINT       NOT NULL
 )
   CATALOG         = 'SNOWFLAKE'
   EXTERNAL_VOLUME = 'ONELAKE_EXTERNAL_VOL'
@@ -266,9 +266,9 @@ CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS (
     TARGET_SEGMENT STRING,
     BUDGET_USD     NUMBER(12,2),
     SPEND_USD      NUMBER(12,2),
-    IMPRESSIONS    NUMBER,
-    CLICKS         NUMBER,
-    CONVERSIONS    NUMBER
+    IMPRESSIONS    BIGINT,
+    CLICKS         BIGINT,
+    CONVERSIONS    BIGINT
 )
   CATALOG         = 'SNOWFLAKE'
   EXTERNAL_VOLUME = 'ONELAKE_EXTERNAL_VOL'
