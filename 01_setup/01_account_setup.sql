@@ -84,13 +84,11 @@ GRANT OWNERSHIP ON DATABASE MSFT_SNOWFLAKE_DEMO TO ROLE DEMO_ADMIN
 
 USE DATABASE MSFT_SNOWFLAKE_DEMO;
 
-CREATE SCHEMA IF NOT EXISTS RAW
+CREATE SCHEMA IF NOT EXISTS BRONZE
   COMMENT = 'Landing zone for raw source data';
-CREATE SCHEMA IF NOT EXISTS STAGING
-  COMMENT = 'Staging area for data transformations';
-CREATE SCHEMA IF NOT EXISTS CURATED
+CREATE SCHEMA IF NOT EXISTS SILVER
   COMMENT = 'Cleansed and enriched data';
-CREATE SCHEMA IF NOT EXISTS ANALYTICS
+CREATE SCHEMA IF NOT EXISTS GOLD
   COMMENT = 'Aggregated and consumption-ready data';
 CREATE SCHEMA IF NOT EXISTS ML
   COMMENT = 'ML features, models, and predictions';
@@ -164,20 +162,20 @@ GRANT USAGE ON INTEGRATION AZURE_STORAGE_INT TO ROLE DEMO_ADMIN;
 -- files arrive (via Azure Storage Queue events).
 -- =============================================================================
 
-USE SCHEMA MSFT_SNOWFLAKE_DEMO.RAW;
+USE SCHEMA MSFT_SNOWFLAKE_DEMO.BRONZE;
 
 -- External stage — replace placeholders with your Azure values
-CREATE OR REPLACE STAGE RAW.ADLS_DATA_STAGE
+CREATE OR REPLACE STAGE BRONZE.ADLS_DATA_STAGE
   URL = 'azure://<your_storage_account>.blob.core.windows.net/snowflake-data/'
   STORAGE_INTEGRATION = AZURE_STORAGE_INT
   FILE_FORMAT = (TYPE = 'CSV' FIELD_DELIMITER = ',' SKIP_HEADER = 1
                  FIELD_OPTIONALLY_ENCLOSED_BY = '"' NULL_IF = ('', 'NULL'))
   COMMENT = 'External stage for ADLS Gen2 data landing container';
 
-GRANT USAGE ON STAGE RAW.ADLS_DATA_STAGE TO ROLE DEMO_ADMIN;
+GRANT USAGE ON STAGE BRONZE.ADLS_DATA_STAGE TO ROLE DEMO_ADMIN;
 
 -- List files in the stage to verify connectivity:
--- LIST @RAW.ADLS_DATA_STAGE;
+-- LIST @BRONZE.ADLS_DATA_STAGE;
 
 -- Notification integration — triggers Snowpipe when files land in ADLS
 -- Requires an Azure Storage Queue connected to blob create events.
@@ -259,7 +257,7 @@ ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION = 'ANY_REGION';
 -- 8. FILE FORMATS
 -- =============================================================================
 
-USE SCHEMA RAW;
+USE SCHEMA BRONZE;
 
 CREATE OR REPLACE FILE FORMAT CSV_FORMAT
   TYPE = 'CSV'
@@ -290,7 +288,7 @@ SHOW WAREHOUSES LIKE 'DEMO%';
 SHOW SCHEMAS IN DATABASE MSFT_SNOWFLAKE_DEMO;
 SHOW STORAGE INTEGRATIONS;
 SHOW NOTIFICATION INTEGRATIONS;
-SHOW STAGES IN SCHEMA MSFT_SNOWFLAKE_DEMO.RAW;
-SHOW FILE FORMATS IN SCHEMA MSFT_SNOWFLAKE_DEMO.RAW;
+SHOW STAGES IN SCHEMA MSFT_SNOWFLAKE_DEMO.BRONZE;
+SHOW FILE FORMATS IN SCHEMA MSFT_SNOWFLAKE_DEMO.BRONZE;
 
 SELECT 'Setup complete. Review the output above to verify all objects were created.' AS STATUS;
