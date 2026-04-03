@@ -5,21 +5,83 @@
 -- exclusively via Snowpipe auto-ingest (Azure Event Grid → Storage Queue).
 --
 -- Prerequisites:
---   - 01_setup/01_account_setup.sql (ADLS_DATA_STAGE, AZURE_STORAGE_INT,
---     AZURE_SNOWPIPE_INT already created)
+--   - 01_setup/01_account_setup.sql run (roles, warehouse, database created)
 --   - Upload CSV files to ADLS under: snowflake-data/csv/
 --       regional_sales_targets/ → regional_sales_targets.csv
 --       marketing_campaigns/    → marketing_campaigns.csv
 --       store_locations/        → store_locations.csv
---   - Azure Event Grid subscription routing blob events to storage queue
 -- =============================================================================
+
+-- =============================================================================
+-- 0. AZURE INTEGRATIONS & STAGE  (ACCOUNTADMIN)
+-- =============================================================================
+-- Skip this section if already run from 01_setup/01_account_setup.sql.
+-- =============================================================================
+
+USE ROLE ACCOUNTADMIN;
+
+-- Storage integration — allows Snowflake to access ADLS Gen2
+-- Replace placeholders with your Azure values
+CREATE OR REPLACE STORAGE INTEGRATION AZURE_STORAGE_INT
+  TYPE = EXTERNAL_STAGE
+  STORAGE_PROVIDER = 'AZURE'
+  ENABLED = TRUE
+  AZURE_TENANT_ID = '<your_azure_tenant_id>'
+  STORAGE_ALLOWED_LOCATIONS = (
+    'azure://<your_storage_account>.blob.core.windows.net/<your_container>/'
+  );
+
+-- Run DESC to get the consent URL and AZURE_MULTI_TENANT_APP_NAME:
+DESC STORAGE INTEGRATION AZURE_STORAGE_INT;
+-- Then in Azure Portal: Storage Account → IAM → Add role assignment
+--   Role: Storage Blob Data Contributor
+--   Member: AZURE_MULTI_TENANT_APP_NAME (from DESC output above)
+
+GRANT USAGE ON INTEGRATION AZURE_STORAGE_INT TO ROLE DEMO_ADMIN;
+
+-- Notification integration — triggers Snowpipe when files land in ADLS
+-- Requires an Azure Storage Queue connected to blob-created events via Event Grid.
+-- Steps:
+--   1. Create a Storage Queue in your Azure Storage Account
+--   2. Create an Event Grid subscription:
+--        Source:     your Storage Account
+--        Event type: Microsoft.Storage.BlobCreated
+--        Endpoint:   Azure Storage Queue → select your queue
+--   3. Replace placeholders below with your values
+CREATE OR REPLACE NOTIFICATION INTEGRATION AZURE_SNOWPIPE_INT
+  ENABLED = TRUE
+  TYPE = QUEUE
+  NOTIFICATION_PROVIDER = AZURE_STORAGE_QUEUE
+  AZURE_STORAGE_QUEUE_PRIMARY_URI = 'https://<your_storage_account>.queue.core.windows.net/<your_queue>'
+  AZURE_TENANT_ID = '<your_azure_tenant_id>'
+  COMMENT = 'Notification integration for Snowpipe auto-ingest from ADLS Gen2';
+
+-- Run DESC to get the service principal that needs Queue permissions:
+DESC NOTIFICATION INTEGRATION AZURE_SNOWPIPE_INT;
+-- Then in Azure Portal: Storage Queue → IAM → Add role assignment
+--   Role: Storage Queue Data Contributor
+--   Member: AZURE_MULTI_TENANT_APP_NAME (from DESC output above)
+
+GRANT USAGE ON INTEGRATION AZURE_SNOWPIPE_INT TO ROLE DEMO_ADMIN;
+
+-- External stage — points to the ADLS container used for CSV file landing
+USE SCHEMA MSFT_SNOWFLAKE_DEMO.BRONZE;
+
+CREATE OR REPLACE STAGE BRONZE.ADLS_DATA_STAGE
+  URL = 'azure://<your_storage_account>.blob.core.windows.net/snowflake-data/'
+  STORAGE_INTEGRATION = AZURE_STORAGE_INT
+  FILE_FORMAT = (TYPE = 'CSV' FIELD_DELIMITER = ',' SKIP_HEADER = 1
+                 FIELD_OPTIONALLY_ENCLOSED_BY = '"' NULL_IF = ('', 'NULL'))
+  COMMENT = 'External stage for ADLS Gen2 data landing container';
+
+GRANT USAGE ON STAGE BRONZE.ADLS_DATA_STAGE TO ROLE DEMO_ADMIN;
 
 USE ROLE DEMO_ADMIN;
 USE WAREHOUSE DEMO_WH;
 USE DATABASE MSFT_SNOWFLAKE_DEMO;
 USE SCHEMA BRONZE;
 
--- Verify stage connectivity (stage created in 01_setup/01_account_setup.sql)
+-- Verify stage connectivity
 LIST @BRONZE.ADLS_DATA_STAGE/csv/;
 
 -- =============================================================================
