@@ -45,15 +45,15 @@ USE SCHEMA BRONZE;
 -- -----------------------------------------------------------------------------
 
 CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS (
-    EVENT_ID             VARCHAR(50)   NOT NULL,
-    SESSION_ID           VARCHAR(50)   NOT NULL,
+    EVENT_ID             STRING   NOT NULL,
+    SESSION_ID           STRING   NOT NULL,
     USER_ID              NUMBER                  COMMENT 'NULL for anonymous sessions',
-    PAGE_URL             VARCHAR(500),
-    EVENT_TYPE           VARCHAR(50)             COMMENT 'page_view, click, add_to_cart, purchase, search, wishlist',
-    REFERRER_SOURCE      VARCHAR(100)            COMMENT 'organic, paid_search, email, social, direct, affiliate',
-    DEVICE_TYPE          VARCHAR(20)             COMMENT 'mobile, desktop, tablet',
-    BROWSER              VARCHAR(50),
-    COUNTRY              VARCHAR(50),
+    PAGE_URL             STRING,
+    EVENT_TYPE           STRING             COMMENT 'page_view, click, add_to_cart, purchase, search, wishlist',
+    REFERRER_SOURCE      STRING            COMMENT 'organic, paid_search, email, social, direct, affiliate',
+    DEVICE_TYPE          STRING             COMMENT 'mobile, desktop, tablet',
+    BROWSER              STRING,
+    COUNTRY              STRING,
     PRODUCT_ID           NUMBER                  COMMENT 'Populated for product-related events',
     SESSION_DURATION_SEC NUMBER                  COMMENT 'Set on session_end events only',
     EVENT_TIMESTAMP      TIMESTAMP_NTZ NOT NULL
@@ -109,13 +109,13 @@ FROM TABLE(GENERATOR(ROWCOUNT => 100000));
 -- -----------------------------------------------------------------------------
 
 CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_IOT_EVENTS (
-    EVENT_ID        VARCHAR(50)   NOT NULL,
-    DEVICE_ID       VARCHAR(50)   NOT NULL,
-    DEVICE_TYPE     VARCHAR(50)             COMMENT 'temperature, humidity, pressure, motion, vibration',
+    EVENT_ID        STRING   NOT NULL,
+    DEVICE_ID       STRING   NOT NULL,
+    DEVICE_TYPE     STRING             COMMENT 'temperature, humidity, pressure, motion, vibration',
     SENSOR_VALUE    FLOAT         NOT NULL,
-    UNIT            VARCHAR(20),
-    WAREHOUSE_ID    VARCHAR(20),
-    LOCATION_ZONE   VARCHAR(50),
+    UNIT            STRING,
+    WAREHOUSE_ID    STRING,
+    LOCATION_ZONE   STRING,
     ALERT_TRIGGERED BOOLEAN       DEFAULT FALSE,
     EVENT_TIMESTAMP TIMESTAMP_NTZ NOT NULL
 )
@@ -182,8 +182,8 @@ FROM devices;
 -- -----------------------------------------------------------------------------
 
 CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_REGIONAL_TARGETS (
-    REGION          VARCHAR(50)  NOT NULL,
-    CHANNEL         VARCHAR(50)  NOT NULL,
+    REGION          STRING  NOT NULL,
+    CHANNEL         STRING  NOT NULL,
     FISCAL_YEAR     NUMBER(4)    NOT NULL,
     FISCAL_QUARTER  NUMBER(1)    NOT NULL,
     REVENUE_TARGET  NUMBER(14,2) NOT NULL,
@@ -258,12 +258,12 @@ VALUES
 -- -----------------------------------------------------------------------------
 
 CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS (
-    CAMPAIGN_ID    VARCHAR(50)  NOT NULL,
-    CAMPAIGN_NAME  VARCHAR(200) NOT NULL,
-    CAMPAIGN_TYPE  VARCHAR(50)           COMMENT 'Email, Paid Search, Social, Display, Direct Mail',
+    CAMPAIGN_ID    STRING  NOT NULL,
+    CAMPAIGN_NAME  STRING NOT NULL,
+    CAMPAIGN_TYPE  STRING           COMMENT 'Email, Paid Search, Social, Display, Direct Mail',
     START_DATE     DATE,
     END_DATE       DATE,
-    TARGET_SEGMENT VARCHAR(50),
+    TARGET_SEGMENT STRING,
     BUDGET_USD     NUMBER(12,2),
     SPEND_USD      NUMBER(12,2),
     IMPRESSIONS    NUMBER,
