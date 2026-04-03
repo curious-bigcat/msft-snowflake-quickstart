@@ -339,63 +339,32 @@ SELECT SYSTEM$GET_ICEBERG_TABLE_INFORMATION('BRONZE.FABRIC_MARKETING_CAMPAIGNS')
 SELECT 'Section A complete -- synthetic Fabric data written to OneLake as Iceberg.' AS STATUS;
 
 -- =============================================================================
--- SECTION B: PRODUCTION CATALOG INTEGRATION  [PRODUCTION]
+-- SECTION B: PRODUCTION CATALOG INTEGRATION  [PRODUCTION — OPTIONAL]
 -- =============================================================================
--- Points Snowflake at real Fabric-managed Iceberg tables in OneLake.
--- No data is copied -- both platforms read the same Parquet files.
+-- USE THIS SECTION ONLY when you have real Fabric-native tables in OneLake
+-- (tables created and owned by Fabric/Delta, not seeded by Section A).
 --
--- How it works:
---   1. Fabric Lakehouse tables are stored as Delta in OneLake.
---   2. OneLake auto-generates Iceberg metadata (*.metadata.json) alongside each table.
---   3. Snowflake uses CATALOG_SOURCE = OBJECT_STORE (no REST catalog, no OAuth).
---      Access via ONELAKE_READ_VOL (service principal with Contributor on workspace).
+-- !! SKIP THIS ENTIRE SECTION IF YOU RAN SECTION A !!
+-- Section A creates BRONZE.FABRIC_* as Snowflake-managed Iceberg tables and
+-- they are already fully accessible. The catalog integration below is not
+-- needed for those tables — it is only required to read tables that Fabric
+-- itself wrote to OneLake (e.g. via Dataflows, Spark, or Lakehouse ingestion).
 --
--- !! STOP: Complete Step 0 below before running the CREATE TABLE statements. !!
--- The METADATA_FILE_PATH must be the exact path to a real .metadata.json file.
--- Running with a placeholder will cause "Missing or invalid file" errors.
+-- Why the catalog integration is needed here (but not in Section A):
+--   Section A: CATALOG = 'SNOWFLAKE' — Snowflake owns the metadata, no extra
+--              integration required.
+--   Section B: CATALOG = FABRIC_ONELAKE_CATALOG_INT — Fabric owns the metadata.
+--              Snowflake needs CATALOG_SOURCE = OBJECT_STORE to read an external
+--              .metadata.json file it did not create.
 --
--- Skip this section if you ran Section A (they CREATE OR REPLACE the same tables).
+-- Before running the CREATE TABLE statements below:
+--   1. In Fabric portal: Lakehouse -> <table> -> Properties -> copy the ABFS path
+--   2. Browse to the metadata/ subfolder and note the latest .metadata.json filename
+--   3. The METADATA_FILE_PATH is relative to ONELAKE_READ_VOL base URL (Tables/)
+--      e.g. 'clickstream_events/metadata/00001-abc123def456.metadata.json'
+--   4. Replace each <replace-with-actual-uuid> below with the real filename
+--   5. Uncomment and run each CREATE TABLE statement individually
 -- =============================================================================
-
--- -----------------------------------------------------------------------------
--- B0. GET ACTUAL METADATA FILE PATHS  (run first, do not skip)
--- -----------------------------------------------------------------------------
--- OPTION 1: If you ran Section A, extract paths from the seeded Iceberg tables.
--- The metadataLocation value is the full OneLake URL; extract the part after
--- the ONELAKE_READ_VOL base URL and paste it into the METADATA_FILE_PATH below.
-
-SELECT
-    'FABRIC_CLICKSTREAM_EVENTS'  AS TABLE_NAME,
-    PARSE_JSON(SYSTEM$GET_ICEBERG_TABLE_INFORMATION('BRONZE.FABRIC_CLICKSTREAM_EVENTS'))
-        :metadataLocation::STRING AS METADATA_LOCATION
-UNION ALL SELECT
-    'FABRIC_IOT_EVENTS',
-    PARSE_JSON(SYSTEM$GET_ICEBERG_TABLE_INFORMATION('BRONZE.FABRIC_IOT_EVENTS'))
-        :metadataLocation::STRING
-UNION ALL SELECT
-    'FABRIC_REGIONAL_TARGETS',
-    PARSE_JSON(SYSTEM$GET_ICEBERG_TABLE_INFORMATION('BRONZE.FABRIC_REGIONAL_TARGETS'))
-        :metadataLocation::STRING
-UNION ALL SELECT
-    'FABRIC_MARKETING_CAMPAIGNS',
-    PARSE_JSON(SYSTEM$GET_ICEBERG_TABLE_INFORMATION('BRONZE.FABRIC_MARKETING_CAMPAIGNS'))
-        :metadataLocation::STRING;
-
--- OPTION 2: Browse OneLake directly to find the latest metadata file.
--- In the Fabric portal: Lakehouse -> Files -> snowflake-iceberg -> fabric ->
---   <table_folder> -> metadata -> copy the filename ending in .metadata.json
--- The path to use is relative to the ONELAKE_READ_VOL base URL, e.g.:
---   fabric/clickstream_events/metadata/00001-<uuid>.metadata.json
-
--- OPTION 3: List files via the external volume stage.
--- LIST @BRONZE.ADLS_DATA_STAGE/snowflake-iceberg/fabric/clickstream_events/metadata/;
--- LIST @BRONZE.ADLS_DATA_STAGE/snowflake-iceberg/fabric/iot_events/metadata/;
--- LIST @BRONZE.ADLS_DATA_STAGE/snowflake-iceberg/fabric/regional_targets/metadata/;
--- LIST @BRONZE.ADLS_DATA_STAGE/snowflake-iceberg/fabric/marketing_campaigns/metadata/;
-
--- After retrieving the paths, replace the METADATA_FILE_PATH values below and
--- then run the remainder of this section.
--- -----------------------------------------------------------------------------
 
 USE ROLE ACCOUNTADMIN;
 USE WAREHOUSE DEMO_WH;
@@ -405,7 +374,7 @@ CREATE OR REPLACE CATALOG INTEGRATION FABRIC_ONELAKE_CATALOG_INT
   CATALOG_SOURCE = OBJECT_STORE
   TABLE_FORMAT   = ICEBERG
   ENABLED        = TRUE
-  COMMENT = 'Reads Iceberg metadata from Fabric OneLake for zero-copy table access';
+  COMMENT = 'Reads Iceberg metadata from Fabric-native OneLake tables (OBJECT_STORE catalog)';
 
 DESCRIBE CATALOG INTEGRATION FABRIC_ONELAKE_CATALOG_INT;
 GRANT USAGE ON INTEGRATION FABRIC_ONELAKE_CATALOG_INT TO ROLE DEMO_ADMIN;
@@ -413,57 +382,56 @@ GRANT USAGE ON INTEGRATION FABRIC_ONELAKE_CATALOG_INT TO ROLE DEMO_ADMIN;
 USE ROLE DEMO_ADMIN;
 USE SCHEMA BRONZE;
 
--- !! Replace each METADATA_FILE_PATH value with the actual path from Step B0 above !!
--- Path is relative to the ONELAKE_READ_VOL base URL.
--- Example: 'fabric/clickstream_events/metadata/00001-abc123def456.metadata.json'
+-- Uncomment each block only after replacing <replace-with-actual-uuid> with the
+-- real metadata filename from the Fabric portal.
 
-CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS
-  EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
-  CATALOG            = FABRIC_ONELAKE_CATALOG_INT
-  METADATA_FILE_PATH = 'fabric/clickstream_events/metadata/<replace-with-actual-uuid>.metadata.json'
-  COMMENT = 'Clickstream events from Fabric Real-Time Intelligence -- zero-copy via OneLake';
+-- CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS
+--   EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
+--   CATALOG            = FABRIC_ONELAKE_CATALOG_INT
+--   METADATA_FILE_PATH = 'clickstream_events/metadata/<replace-with-actual-uuid>.metadata.json'
+--   COMMENT = 'Clickstream events from Fabric Real-Time Intelligence -- zero-copy via OneLake';
 
-CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_IOT_EVENTS
-  EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
-  CATALOG            = FABRIC_ONELAKE_CATALOG_INT
-  METADATA_FILE_PATH = 'fabric/iot_events/metadata/<replace-with-actual-uuid>.metadata.json'
-  COMMENT = 'IoT sensor events from Fabric Real-Time Intelligence -- zero-copy via OneLake';
+-- CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_IOT_EVENTS
+--   EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
+--   CATALOG            = FABRIC_ONELAKE_CATALOG_INT
+--   METADATA_FILE_PATH = 'iot_events/metadata/<replace-with-actual-uuid>.metadata.json'
+--   COMMENT = 'IoT sensor events from Fabric Real-Time Intelligence -- zero-copy via OneLake';
 
-CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_REGIONAL_TARGETS
-  EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
-  CATALOG            = FABRIC_ONELAKE_CATALOG_INT
-  METADATA_FILE_PATH = 'fabric/regional_targets/metadata/<replace-with-actual-uuid>.metadata.json'
-  COMMENT = 'Regional sales targets from Fabric Lakehouse -- zero-copy via OneLake';
+-- CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_REGIONAL_TARGETS
+--   EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
+--   CATALOG            = FABRIC_ONELAKE_CATALOG_INT
+--   METADATA_FILE_PATH = 'regional_sales_targets/metadata/<replace-with-actual-uuid>.metadata.json'
+--   COMMENT = 'Regional sales targets from Fabric Lakehouse -- zero-copy via OneLake';
 
-CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS
-  EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
-  CATALOG            = FABRIC_ONELAKE_CATALOG_INT
-  METADATA_FILE_PATH = 'fabric/marketing_campaigns/metadata/<replace-with-actual-uuid>.metadata.json'
-  COMMENT = 'Marketing campaigns from Fabric Lakehouse -- zero-copy via OneLake';
+-- CREATE OR REPLACE ICEBERG TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS
+--   EXTERNAL_VOLUME    = 'ONELAKE_READ_VOL'
+--   CATALOG            = FABRIC_ONELAKE_CATALOG_INT
+--   METADATA_FILE_PATH = 'marketing_campaigns/metadata/<replace-with-actual-uuid>.metadata.json'
+--   COMMENT = 'Marketing campaigns from Fabric Lakehouse -- zero-copy via OneLake';
 
-GRANT SELECT ON TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS    TO ROLE DEMO_ADMIN;
-GRANT SELECT ON TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS    TO ROLE DEMO_ANALYST;
-GRANT SELECT ON TABLE BRONZE.FABRIC_IOT_EVENTS            TO ROLE DEMO_ADMIN;
-GRANT SELECT ON TABLE BRONZE.FABRIC_IOT_EVENTS            TO ROLE DEMO_ANALYST;
-GRANT SELECT ON TABLE BRONZE.FABRIC_REGIONAL_TARGETS      TO ROLE DEMO_ADMIN;
-GRANT SELECT ON TABLE BRONZE.FABRIC_REGIONAL_TARGETS      TO ROLE DEMO_ANALYST;
-GRANT SELECT ON TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS   TO ROLE DEMO_ADMIN;
-GRANT SELECT ON TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS   TO ROLE DEMO_ANALYST;
+-- GRANT SELECT ON TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS    TO ROLE DEMO_ADMIN;
+-- GRANT SELECT ON TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS    TO ROLE DEMO_ANALYST;
+-- GRANT SELECT ON TABLE BRONZE.FABRIC_IOT_EVENTS            TO ROLE DEMO_ADMIN;
+-- GRANT SELECT ON TABLE BRONZE.FABRIC_IOT_EVENTS            TO ROLE DEMO_ANALYST;
+-- GRANT SELECT ON TABLE BRONZE.FABRIC_REGIONAL_TARGETS      TO ROLE DEMO_ADMIN;
+-- GRANT SELECT ON TABLE BRONZE.FABRIC_REGIONAL_TARGETS      TO ROLE DEMO_ANALYST;
+-- GRANT SELECT ON TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS   TO ROLE DEMO_ADMIN;
+-- GRANT SELECT ON TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS   TO ROLE DEMO_ANALYST;
 
-SHOW ICEBERG TABLES IN SCHEMA BRONZE;
+-- SHOW ICEBERG TABLES IN SCHEMA BRONZE;
 
-SELECT * FROM BRONZE.FABRIC_CLICKSTREAM_EVENTS  LIMIT 5;
-SELECT * FROM BRONZE.FABRIC_IOT_EVENTS           LIMIT 5;
-SELECT * FROM BRONZE.FABRIC_REGIONAL_TARGETS     LIMIT 5;
-SELECT * FROM BRONZE.FABRIC_MARKETING_CAMPAIGNS  LIMIT 5;
+-- SELECT * FROM BRONZE.FABRIC_CLICKSTREAM_EVENTS  LIMIT 5;
+-- SELECT * FROM BRONZE.FABRIC_IOT_EVENTS           LIMIT 5;
+-- SELECT * FROM BRONZE.FABRIC_REGIONAL_TARGETS     LIMIT 5;
+-- SELECT * FROM BRONZE.FABRIC_MARKETING_CAMPAIGNS  LIMIT 5;
 
 -- Refresh after Fabric writes new data:
--- ALTER ICEBERG TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS   REFRESH 'clickstream_events/metadata/<new>.metadata.json';
--- ALTER ICEBERG TABLE BRONZE.FABRIC_IOT_EVENTS           REFRESH 'iot_events/metadata/<new>.metadata.json';
--- ALTER ICEBERG TABLE BRONZE.FABRIC_REGIONAL_TARGETS     REFRESH 'regional_sales_targets/metadata/<new>.metadata.json';
--- ALTER ICEBERG TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS  REFRESH 'marketing_campaigns/metadata/<new>.metadata.json';
+-- ALTER ICEBERG TABLE BRONZE.FABRIC_CLICKSTREAM_EVENTS   REFRESH 'clickstream_events/metadata/<new-uuid>.metadata.json';
+-- ALTER ICEBERG TABLE BRONZE.FABRIC_IOT_EVENTS           REFRESH 'iot_events/metadata/<new-uuid>.metadata.json';
+-- ALTER ICEBERG TABLE BRONZE.FABRIC_REGIONAL_TARGETS     REFRESH 'regional_sales_targets/metadata/<new-uuid>.metadata.json';
+-- ALTER ICEBERG TABLE BRONZE.FABRIC_MARKETING_CAMPAIGNS  REFRESH 'marketing_campaigns/metadata/<new-uuid>.metadata.json';
 
-SELECT 'Section B complete -- Fabric OneLake catalog integration ready.' AS STATUS;
+SELECT 'Section B ready -- uncomment and run CREATE TABLE blocks after substituting real metadata paths.' AS STATUS;
 
 -- =============================================================================
 -- SECTION C: WRITE BRONZE RAW TABLES BACK TO FABRIC  [BOTH PATHS]
