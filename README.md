@@ -29,8 +29,6 @@ A comprehensive hands-on lab demonstrating enterprise data integration between *
 │  • DT_ORDERS_CLEANED   (Dynamic Table, DOWNSTREAM)                      │
 │  • DT_ORDERS_ENRICHED  (Dynamic Table, DOWNSTREAM)                      │
 │  • ORDERS_SCD2         (SCD Type 2 via Streams + Tasks)                 │
-│  • DT_SALES_SUMMARY · DT_CUSTOMER_360 · DT_PRODUCT_PERFORMANCE          │
-│    (Gold-schema Dynamic Tables built in Silver layer, 15-min lag)        │
 │  • Snowpark UDF: UDF_SENTIMENT_SCORE (permanent Python UDF)             │
 │  • PROCESSED_REVIEWS, PRODUCT_SENTIMENT_SUMMARY,                        │
 │    MONTHLY_REVENUE_BY_CATEGORY (Snowpark DataFrame API)                 │
@@ -39,7 +37,10 @@ A comprehensive hands-on lab demonstrating enterprise data integration between *
            ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  GOLD  (schema: GOLD)                                                    │
-│  Consumption-ready — materialized views, ML, AI                          │
+│  Consumption-ready — target tables, dynamic tables, materialized views, ML, AI │
+│  Target Tables:  DAILY_ORDER_METRICS · SUPPORT_TICKET_METRICS           │
+│  Dynamic Tables: DT_SALES_SUMMARY · DT_CUSTOMER_360 ·                   │
+│                  DT_PRODUCT_PERFORMANCE (1-hour lag)                     │
 │  Materialized Views: MV_TOP_CUSTOMERS · MV_MONTHLY_KPI ·                │
 │                      MV_PRODUCT_HEALTH                                   │
 │  ML Models:  TICKET_PRIORITY_CLASSIFIER · REVENUE_PREDICTOR             │
@@ -101,15 +102,15 @@ See [`01_setup/02_azure_prerequisites.md`](01_setup/02_azure_prerequisites.md) f
 ### Phase 3: Silver Layer — Processing
 | File | Description |
 |---|---|
-| [`03_silver/01_silver_layer.sql`](03_silver/01_silver_layer.sql) | Part 1: `SILVER.DT_ORDERS_CLEANED` (validation, quality flags) → `SILVER.DT_ORDERS_ENRICHED` (customer join, value tiers). Part 2: CDC streams on BRONZE tables, SCD Type 2 via MERGE, Task DAG. Part 3: Gold-schema Dynamic Tables — `DT_SALES_SUMMARY`, `DT_CUSTOMER_360`, `DT_PRODUCT_PERFORMANCE` (15-min lag) |
-| [`03_silver/02_snowpark_processing.ipynb`](03_silver/02_snowpark_processing.ipynb) | Snowpark: window functions, Python UDF registration, sentiment scoring, writes to GOLD |
+| [`03_silver/01_silver_layer.sql`](03_silver/01_silver_layer.sql) | Part 1: `SILVER.DT_ORDERS_CLEANED` (validation, quality flags) → `SILVER.DT_ORDERS_ENRICHED` (customer join, value tiers). Part 2: CDC streams on BRONZE tables, SCD Type 2 via MERGE, Task DAG (tasks write to `GOLD.DAILY_ORDER_METRICS` and `GOLD.SUPPORT_TICKET_METRICS`) |
+| [`03_silver/02_snowpark_processing.ipynb`](03_silver/02_snowpark_processing.ipynb) | Snowpark: window functions, Python UDF registration, sentiment scoring, writes to SILVER (`PROCESSED_REVIEWS`, `PRODUCT_SENTIMENT_SUMMARY`, `MONTHLY_REVENUE_BY_CATEGORY`) |
 
 **Key patterns:** Dynamic Tables with `DOWNSTREAM` lag, Streams for CDC, Task DAGs (all tasks in SILVER schema), Snowpark DataFrame API, permanent Python UDFs stored in `@ML.ML_MODELS`.
 
 ### Phase 4: Gold Layer — Consumption, ML, and AI
 | File | Description |
 |---|---|
-| [`04_gold/01_gold_layer.sql`](04_gold/01_gold_layer.sql) | Part 1: Materialized Views — `MV_TOP_CUSTOMERS`, `MV_MONTHLY_KPI`, `MV_PRODUCT_HEALTH`. Part 2: Semantic View + Cortex Search services (PRODUCT_REVIEW_SEARCH, SUPPORT_TICKET_SEARCH). Part 3: Cortex Agent + MCP Server + Snowflake Intelligence |
+| [`04_gold/01_gold_layer.sql`](04_gold/01_gold_layer.sql) | Part 0: Target tables (`DAILY_ORDER_METRICS`, `SUPPORT_TICKET_METRICS`). Part 1: Dynamic Tables — `DT_SALES_SUMMARY`, `DT_CUSTOMER_360`, `DT_PRODUCT_PERFORMANCE` (1-hour lag). Part 2: Materialized Views — `MV_TOP_CUSTOMERS`, `MV_MONTHLY_KPI`, `MV_PRODUCT_HEALTH`. Part 3: Semantic View + Cortex Search services. Part 4: Cortex Agent + MCP Server + Snowflake Intelligence |
 | [`04_gold/02_ml_models/01_ticket_priority_classifier.ipynb`](04_gold/02_ml_models/01_ticket_priority_classifier.ipynb) | Feature engineering from GOLD tables → RandomForest classifier → Model Registry |
 | [`04_gold/02_ml_models/02_revenue_predictor.ipynb`](04_gold/02_ml_models/02_revenue_predictor.ipynb) | Time-series feature engineering → XGBRegressor → Model Registry |
 
@@ -152,9 +153,10 @@ See [`01_setup/02_azure_prerequisites.md`](01_setup/02_azure_prerequisites.md) f
 | **Roles** | `DEMO_ADMIN` · `DEMO_ANALYST` · `DEMO_ML_ENGINEER` · `DEMO_AGENT_USER` |
 | **Warehouses** | `DEMO_WH` · `DEMO_ML_WH` (Snowpark-optimized) · `DEMO_CORTEX_WH` |
 | **Bronze Tables** | `CUSTOMERS` · `PRODUCTS` · `ORDERS` · `ORDER_ITEMS` · `PRODUCT_REVIEWS` · `SUPPORT_TICKETS` (native) · `REGIONAL_SALES_TARGETS` · `MARKETING_CAMPAIGNS` (ADLS CSV) · `FABRIC_CLICKSTREAM_EVENTS` · `FABRIC_IOT_EVENTS` · `FABRIC_REGIONAL_TARGETS` · `FABRIC_MARKETING_CAMPAIGNS` (Fabric Iceberg — zero-copy) |
-| **Silver Tables** | `ORDERS_SCD2` · `PROCESSED_REVIEWS` · `PRODUCT_SENTIMENT_SUMMARY` · `MONTHLY_REVENUE_BY_CATEGORY` · `DAILY_ORDER_METRICS` · `SUPPORT_TICKET_METRICS` |
+| **Silver Tables** | `ORDERS_SCD2` · `PROCESSED_REVIEWS` · `PRODUCT_SENTIMENT_SUMMARY` · `MONTHLY_REVENUE_BY_CATEGORY` |
 | **Silver DTs** | `DT_ORDERS_CLEANED` · `DT_ORDERS_ENRICHED` |
 | **Silver Tasks** | `TASK_ORDERS_SCD2` · `TASK_DAILY_METRICS` · `TASK_TICKET_METRICS` |
+| **Gold Tables** | `DAILY_ORDER_METRICS` · `SUPPORT_TICKET_METRICS` |
 | **Gold DTs** | `DT_SALES_SUMMARY` · `DT_CUSTOMER_360` · `DT_PRODUCT_PERFORMANCE` |
 | **Gold MVs** | `MV_TOP_CUSTOMERS` · `MV_MONTHLY_KPI` · `MV_PRODUCT_HEALTH` |
 | **ML Models** | `TICKET_PRIORITY_CLASSIFIER v1` · `REVENUE_PREDICTOR v1` |

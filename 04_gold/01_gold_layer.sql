@@ -1,10 +1,14 @@
 -- =============================================================================
 -- MEDALLION ARCHITECTURE: GOLD Layer
 -- =============================================================================
--- Part 1: Materialized Views — pre-computed consumption views for BI and AI
--- Part 2: Cortex Analyst — Semantic View for natural-language-to-SQL
+-- Part 0: Target Tables  — DAILY_ORDER_METRICS, SUPPORT_TICKET_METRICS
+--                          (written to by Silver Task DAG)
+-- Part 1: Dynamic Tables — DT_SALES_SUMMARY, DT_CUSTOMER_360, DT_PRODUCT_PERFORMANCE
+--                          (declarative Silver → Gold aggregation pipeline)
+-- Part 2: Materialized Views — pre-computed consumption views for BI and AI
+-- Part 3: Cortex Analyst — Semantic View for natural-language-to-SQL
 --         Cortex Search Services — hybrid keyword+vector search
--- Part 3: Cortex Agent — orchestrates Analyst + Search tools
+-- Part 4: Cortex Agent — orchestrates Analyst + Search tools
 --         MCP Server — exposes Cortex tools to external clients
 --         Snowflake Intelligence — publishes agent to Snowsight chat UI
 --
@@ -12,18 +16,150 @@
 -- =============================================================================
 
 -- =============================================================================
--- PART 1: MATERIALIZED VIEWS
+-- PART 0: TARGET TABLES
 -- =============================================================================
--- Pre-computed, low-latency consumption views for BI, dashboards, and Cortex AI.
--- Built on top of Silver dynamic tables — refreshes automatically when upstream
--- dynamic tables change.
+-- Written to by the Silver Task DAG. Must exist before Silver tasks run.
 
 USE ROLE DEMO_ADMIN;
 USE WAREHOUSE DEMO_WH;
 USE DATABASE MSFT_SNOWFLAKE_DEMO;
 
+CREATE OR REPLACE TABLE GOLD.DAILY_ORDER_METRICS (
+    METRIC_DATE      DATE,
+    REGION           VARCHAR(50),
+    CHANNEL          VARCHAR(50),
+    ORDER_COUNT      NUMBER,
+    TOTAL_REVENUE    NUMBER(12,2),
+    AVG_ORDER_VALUE  NUMBER(12,2),
+    NEW_CUSTOMERS    NUMBER,
+    UPDATED_AT       TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+)
+COMMENT = 'Daily order KPIs by region and channel — populated by SILVER.TASK_DAILY_METRICS';
+
+CREATE OR REPLACE TABLE GOLD.SUPPORT_TICKET_METRICS (
+    METRIC_DATE         DATE,
+    CATEGORY            VARCHAR(50),
+    PRIORITY            VARCHAR(20),
+    TICKET_COUNT        NUMBER,
+    AVG_RESOLUTION_HRS  NUMBER(10,2),
+    AVG_SATISFACTION    NUMBER(4,2),
+    OPEN_TICKETS        NUMBER
+)
+COMMENT = 'Daily support ticket KPIs — populated by SILVER.TASK_TICKET_METRICS';
+
+SELECT 'Gold target tables created.' AS STATUS;
+
 -- =============================================================================
--- 1a. TOP CUSTOMERS BY LIFETIME VALUE
+-- PART 1: DYNAMIC TABLES
+-- =============================================================================
+-- Declarative Silver → Gold aggregation pipeline.
+-- These replace the manual CTAS pattern — Snowflake refreshes automatically
+-- when upstream Silver dynamic tables (DT_ORDERS_ENRICHED) change.
+
+-- =============================================================================
+-- 1a. SALES SUMMARY — Monthly revenue by region and channel
+-- =============================================================================
+
+CREATE OR REPLACE DYNAMIC TABLE GOLD.DT_SALES_SUMMARY
+  TARGET_LAG = '1 hour'
+  WAREHOUSE = DEMO_WH
+  COMMENT = 'Gold: Monthly sales summary by region and channel'
+AS
+SELECT
+    DATE_TRUNC('month', ORDER_DATE)        AS MONTH,
+    REGION,
+    CHANNEL,
+    COUNT(ORDER_ID)                        AS TOTAL_ORDERS,
+    SUM(NET_AMOUNT)                        AS TOTAL_REVENUE,
+    COUNT(DISTINCT CUSTOMER_ID)            AS UNIQUE_CUSTOMERS,
+    ROUND(AVG(NET_AMOUNT), 2)              AS AVG_ORDER_VALUE,
+    SUM(DISCOUNT_AMOUNT)                   AS TOTAL_DISCOUNT
+FROM SILVER.DT_ORDERS_ENRICHED
+GROUP BY DATE_TRUNC('month', ORDER_DATE), REGION, CHANNEL;
+
+-- =============================================================================
+-- 1b. CUSTOMER 360 — Lifetime value, engagement status, and tier
+-- =============================================================================
+
+CREATE OR REPLACE DYNAMIC TABLE GOLD.DT_CUSTOMER_360
+  TARGET_LAG = '1 hour'
+  WAREHOUSE = DEMO_WH
+  COMMENT = 'Gold: Customer 360 view with lifetime value and engagement metrics'
+AS
+SELECT
+    c.CUSTOMER_ID,
+    c.FIRST_NAME || ' ' || c.LAST_NAME        AS CUSTOMER_NAME,
+    c.CUSTOMER_SEGMENT,
+    c.CITY,
+    c.STATE,
+    c.COUNTRY,
+    COALESCE(SUM(o.NET_AMOUNT), 0)            AS LIFETIME_VALUE,
+    COUNT(DISTINCT o.ORDER_ID)                AS TOTAL_ORDERS,
+    ROUND(AVG(o.NET_AMOUNT), 2)               AS AVG_ORDER_VALUE,
+    DATEDIFF('day', MAX(o.ORDER_DATE)::DATE, CURRENT_DATE()) AS DAYS_SINCE_LAST_ORDER,
+    CASE
+        WHEN DATEDIFF('day', MAX(o.ORDER_DATE)::DATE, CURRENT_DATE()) <= 30  THEN 'Active'
+        WHEN DATEDIFF('day', MAX(o.ORDER_DATE)::DATE, CURRENT_DATE()) <= 90  THEN 'At Risk'
+        ELSE 'Lapsed'
+    END AS ENGAGEMENT_STATUS,
+    CASE
+        WHEN COALESCE(SUM(o.NET_AMOUNT), 0) >= 50000 THEN 'Platinum'
+        WHEN COALESCE(SUM(o.NET_AMOUNT), 0) >= 20000 THEN 'Gold'
+        WHEN COALESCE(SUM(o.NET_AMOUNT), 0) >= 5000  THEN 'Silver'
+        ELSE 'Bronze'
+    END AS CUSTOMER_TIER
+FROM BRONZE.CUSTOMERS c
+LEFT JOIN SILVER.DT_ORDERS_ENRICHED o ON c.CUSTOMER_ID = o.CUSTOMER_ID
+GROUP BY c.CUSTOMER_ID, c.FIRST_NAME, c.LAST_NAME, c.CUSTOMER_SEGMENT,
+         c.CITY, c.STATE, c.COUNTRY;
+
+-- =============================================================================
+-- 1c. PRODUCT PERFORMANCE — Revenue, units sold, and review metrics
+-- =============================================================================
+
+CREATE OR REPLACE DYNAMIC TABLE GOLD.DT_PRODUCT_PERFORMANCE
+  TARGET_LAG = '1 hour'
+  WAREHOUSE = DEMO_WH
+  COMMENT = 'Gold: Product performance with revenue, units sold, and review metrics'
+AS
+SELECT
+    p.PRODUCT_ID,
+    p.PRODUCT_NAME,
+    p.CATEGORY,
+    p.SUB_CATEGORY,
+    p.BRAND,
+    p.UNIT_PRICE,
+    COALESCE(SUM(oi.QUANTITY), 0)          AS TOTAL_UNITS_SOLD,
+    COALESCE(SUM(oi.LINE_TOTAL), 0)        AS TOTAL_REVENUE,
+    ROUND(AVG(r.RATING), 2)               AS AVG_RATING,
+    COUNT(DISTINCT r.REVIEW_ID)           AS REVIEW_COUNT,
+    ROUND(
+        100.0 * COUNT_IF(r.RATING >= 4) / NULLIF(COUNT(r.REVIEW_ID), 0),
+        1
+    )                                      AS POSITIVE_REVIEW_PCT
+FROM BRONZE.PRODUCTS p
+LEFT JOIN BRONZE.ORDER_ITEMS oi     ON p.PRODUCT_ID = oi.PRODUCT_ID
+LEFT JOIN BRONZE.PRODUCT_REVIEWS r  ON p.PRODUCT_ID = r.PRODUCT_ID
+GROUP BY p.PRODUCT_ID, p.PRODUCT_NAME, p.CATEGORY, p.SUB_CATEGORY,
+         p.BRAND, p.UNIT_PRICE;
+
+-- Verify dynamic tables
+SHOW DYNAMIC TABLES IN SCHEMA MSFT_SNOWFLAKE_DEMO.GOLD;
+SELECT * FROM GOLD.DT_SALES_SUMMARY       LIMIT 5;
+SELECT * FROM GOLD.DT_CUSTOMER_360        LIMIT 5;
+SELECT * FROM GOLD.DT_PRODUCT_PERFORMANCE LIMIT 5;
+
+SELECT 'Gold dynamic tables created.' AS STATUS;
+
+-- =============================================================================
+-- PART 2: MATERIALIZED VIEWS
+-- =============================================================================
+-- Pre-computed, low-latency consumption views for BI, dashboards, and Cortex AI.
+-- Built on top of Gold dynamic tables — refreshes automatically when upstream
+-- dynamic tables change.
+
+-- =============================================================================
+-- 2a. TOP CUSTOMERS BY LIFETIME VALUE
 -- =============================================================================
 
 CREATE OR REPLACE MATERIALIZED VIEW GOLD.MV_TOP_CUSTOMERS
@@ -48,7 +184,7 @@ WHERE LIFETIME_VALUE > 0
 QUALIFY LTV_RANK <= 1000;
 
 -- =============================================================================
--- 1b. MONTHLY KPI SUMMARY
+-- 2b. MONTHLY KPI SUMMARY
 -- =============================================================================
 
 CREATE OR REPLACE MATERIALIZED VIEW GOLD.MV_MONTHLY_KPI
@@ -71,7 +207,7 @@ SELECT
 FROM GOLD.DT_SALES_SUMMARY;
 
 -- =============================================================================
--- 1c. PRODUCT HEALTH
+-- 2c. PRODUCT HEALTH
 -- =============================================================================
 
 CREATE OR REPLACE MATERIALIZED VIEW GOLD.MV_PRODUCT_HEALTH
@@ -101,7 +237,7 @@ SELECT
         ELSE 'Unrated'
     END AS PRODUCT_HEALTH_SCORE
 FROM GOLD.DT_PRODUCT_PERFORMANCE p
-LEFT JOIN GOLD.PRODUCT_SENTIMENT_SUMMARY ps ON p.PRODUCT_ID = ps.PRODUCT_ID;
+LEFT JOIN SILVER.PRODUCT_SENTIMENT_SUMMARY ps ON p.PRODUCT_ID = ps.PRODUCT_ID;
 
 -- Verification
 SHOW MATERIALIZED VIEWS IN SCHEMA GOLD;
@@ -113,7 +249,7 @@ SELECT * FROM GOLD.MV_PRODUCT_HEALTH ORDER BY TOTAL_REVENUE DESC LIMIT 10;
 SELECT 'Gold materialized views created.' AS STATUS;
 
 -- =============================================================================
--- PART 2: CORTEX ANALYST AND SEARCH SERVICES
+-- PART 3: CORTEX ANALYST AND SEARCH SERVICES
 -- =============================================================================
 
 USE ROLE DEMO_ADMIN;
@@ -122,7 +258,7 @@ USE DATABASE MSFT_SNOWFLAKE_DEMO;
 USE SCHEMA AGENTS;
 
 -- =============================================================================
--- 2a. SEMANTIC VIEW — Sales & Customer Analytics
+-- 3a. SEMANTIC VIEW — Sales & Customer Analytics
 -- =============================================================================
 -- Enables natural language questions like:
 --   "What was total revenue by region last quarter?"
@@ -293,7 +429,7 @@ GRANT SELECT ON SEMANTIC VIEW AGENTS.SALES_ANALYTICS_SV TO ROLE DEMO_AGENT_USER;
 SELECT 'Semantic view created.' AS STATUS;
 
 -- =============================================================================
--- 2b. PRODUCT REVIEWS SEARCH
+-- 3b. PRODUCT REVIEWS SEARCH
 -- Semantic search over review text — find by meaning, not just keywords.
 -- Example: "reviews about battery life", "customers who mentioned overheating"
 -- =============================================================================
@@ -318,11 +454,11 @@ AS (
         COALESCE(pr.SENTIMENT_SCORE, 0)         AS SENTIMENT_SCORE
     FROM BRONZE.PRODUCT_REVIEWS r
     LEFT JOIN BRONZE.PRODUCTS p       ON r.PRODUCT_ID = p.PRODUCT_ID
-    LEFT JOIN GOLD.PROCESSED_REVIEWS pr ON r.REVIEW_ID = pr.REVIEW_ID
+    LEFT JOIN SILVER.PROCESSED_REVIEWS pr ON r.REVIEW_ID = pr.REVIEW_ID
 );
 
 -- =============================================================================
--- 2c. SUPPORT TICKET SEARCH
+-- 3c. SUPPORT TICKET SEARCH
 -- Semantic search over ticket text — find similar past issues.
 -- Example: "network connectivity timeout errors", "billing overcharge"
 -- =============================================================================
@@ -389,7 +525,7 @@ GRANT USAGE ON CORTEX SEARCH SERVICE AGENTS.SUPPORT_TICKET_SEARCH TO ROLE DEMO_A
 SELECT 'Cortex Analyst semantic view and Search services created.' AS STATUS;
 
 -- =============================================================================
--- PART 3: CORTEX AGENT, MCP SERVER, AND SNOWFLAKE INTELLIGENCE
+-- PART 4: CORTEX AGENT, MCP SERVER, AND SNOWFLAKE INTELLIGENCE
 -- =============================================================================
 
 USE ROLE DEMO_ADMIN;
@@ -398,7 +534,7 @@ USE DATABASE MSFT_SNOWFLAKE_DEMO;
 USE SCHEMA AGENTS;
 
 -- =============================================================================
--- 3a. CORTEX AGENT
+-- 4a. CORTEX AGENT
 -- =============================================================================
 -- Multi-tool agent that automatically decides which tool to use based on the
 -- question, then synthesizes results into a natural language response.
@@ -535,7 +671,7 @@ GRANT USAGE ON AGENT AGENTS.SALES_SUPPORT_AGENT TO ROLE DEMO_AGENT_USER;
 SELECT 'Cortex Agent created.' AS STATUS;
 
 -- =============================================================================
--- 3b. MCP SERVER
+-- 4b. MCP SERVER
 -- =============================================================================
 -- Snowflake-managed MCP server that exposes all Cortex tools to external
 -- MCP clients (Cursor, Claude Desktop, Microsoft AI Foundry, etc.).
@@ -598,7 +734,7 @@ GRANT USAGE ON MCP SERVER AGENTS.DEMO_MCP_SERVER TO ROLE DEMO_AGENT_USER;
 SELECT 'MCP Server created.' AS STATUS;
 
 -- =============================================================================
--- 3c. SNOWFLAKE INTELLIGENCE
+-- 4c. SNOWFLAKE INTELLIGENCE
 -- =============================================================================
 -- Publishes the agent to Snowsight AI & ML -> Agents for no-code chat access.
 
