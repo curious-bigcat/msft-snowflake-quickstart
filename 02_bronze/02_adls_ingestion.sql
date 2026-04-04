@@ -5,7 +5,9 @@
 -- exclusively via Snowpipe auto-ingest (Azure Event Grid → Storage Queue).
 --
 -- Prerequisites:
---   - 01_setup/01_account_setup.sql run (roles, warehouse, database created)
+--   - 01_setup/01_account_setup.sql run (creates AZURE_STORAGE_INT,
+--     AZURE_SNOWPIPE_INT, BRONZE.ADLS_DATA_STAGE, BRONZE.CSV_FORMAT)
+--   - Azure consent flows completed and IAM roles assigned (see below)
 --   - Upload CSV files to ADLS under: snowflake-data/csv/
 --       regional_sales_targets/ → regional_sales_targets.csv
 --       marketing_campaigns/    → marketing_campaigns.csv
@@ -13,203 +15,54 @@
 -- =============================================================================
 
 -- =============================================================================
--- 0. AZURE INTEGRATIONS & STAGE  (ACCOUNTADMIN required)
+-- AZURE SETUP CHECKLIST  (complete before running Section 1)
 -- =============================================================================
--- Complete end-to-end setup for Snowpipe auto-ingest from ADLS Gen2.
--- Steps marked [SQL] are run in Snowflake.
--- Steps marked [AZURE PORTAL] are manual actions in the Azure Portal.
+-- All Snowflake objects are created by 01_account_setup.sql.
+-- The steps below are one-time manual actions in the Azure Portal.
 --
--- Reference: https://interworks.com/blog/2023/01/24/automated-ingestion-from-azure-storage-into-snowflake-via-snowpipe/
--- =============================================================================
-
-USE ROLE ACCOUNTADMIN;
-
--- =============================================================================
--- 0A. STORAGE INTEGRATION
---     Allows Snowflake to authenticate and read files from ADLS Gen2.
--- =============================================================================
-
--- STEP 0A-1 [SQL]: Create the storage integration.
---   This registers a Snowflake-managed service principal in your Azure tenant
---   that will be used to read blobs from the storage container.
---   Replace all placeholders with your actual Azure values.
-CREATE OR REPLACE STORAGE INTEGRATION AZURE_STORAGE_INT
-  TYPE = EXTERNAL_STAGE
-  STORAGE_PROVIDER = 'AZURE'
-  ENABLED = TRUE
-  AZURE_TENANT_ID = '<your_azure_tenant_id>'
-  STORAGE_ALLOWED_LOCATIONS = (
-    'azure://<your_storage_account>.blob.core.windows.net/<your_container>/'
-  );
-
--- STEP 0A-2 [SQL]: Describe the integration.
---   Run this and record two values from the output:
---     AZURE_CONSENT_URL          → open in browser (Step 0A-3)
---     AZURE_MULTI_TENANT_APP_NAME → use for IAM assignment (Step 0A-4)
+-- A. STORAGE INTEGRATION (AZURE_STORAGE_INT)
+--   A-1 [SQL]   DESC STORAGE INTEGRATION AZURE_STORAGE_INT;
+--               Record AZURE_CONSENT_URL and AZURE_MULTI_TENANT_APP_NAME.
+--   A-2 [AZURE] Open AZURE_CONSENT_URL in a browser (Global Admin required).
+--               Click Accept to register the Snowflake enterprise application.
+--   A-3 [AZURE] Storage Account → Access Control (IAM) → Add role assignment
+--               Role: Storage Blob Data Contributor
+--               Member: AZURE_MULTI_TENANT_APP_NAME from A-1
+--
+-- B. STORAGE QUEUE + EVENT GRID  (all steps in Azure Portal)
+--   B-1 [AZURE] Storage Account → Data storage → Queues → + Queue
+--               Name: snowpipe-queue  (note the name for steps B-2 and C below)
+--   B-2 [AZURE] Click the queue → copy the full URL shown at the top, e.g.:
+--                 https://<storage_account>.queue.core.windows.net/<queue_name>
+--               Keep the https:// prefix — do NOT change to azure://
+--   B-3 [AZURE] Storage Account → Events → + Event Subscription
+--               Event Schema:        Event Grid Schema  (NOT Cloud Event Schema v1.0)
+--               Filter to event types: Blob Created only
+--               Endpoint Type:       Storage Queues → select B-1 queue
+--               Filters tab → Subject Begins With:
+--                 /blobServices/default/containers/<your_container>/blobs/
+--
+-- C. NOTIFICATION INTEGRATION (AZURE_SNOWPIPE_INT)
+--   C-1 [SQL]   DESC NOTIFICATION INTEGRATION AZURE_SNOWPIPE_INT;
+--               Record AZURE_CONSENT_URL and AZURE_MULTI_TENANT_APP_NAME.
+--               NOTE: this is a DIFFERENT service principal from A above.
+--   C-2 [AZURE] Open AZURE_CONSENT_URL in a browser → click Accept.
+--   C-3 [AZURE] Storage Account → Queues → <queue_name>
+--               → Access Control (IAM) → Add role assignment
+--               Role: Storage Queue Data Contributor
+--               Member: AZURE_MULTI_TENANT_APP_NAME from C-1
+--               Allow 1–2 minutes for the role assignment to propagate.
+--
+-- D. VERIFY STAGE CONNECTIVITY
 DESC STORAGE INTEGRATION AZURE_STORAGE_INT;
-
--- STEP 0A-3 [AZURE PORTAL]: Approve the Snowflake service principal in your tenant.
---   1. Copy the AZURE_CONSENT_URL from the DESC output above.
---   2. Open it in a browser while signed in as an Azure AD Global Admin
---      (or a user with permission to grant admin consent to enterprise apps).
---   3. Review the permissions and click Accept.
---   Result: A new enterprise application for Snowflake appears in
---           Azure AD → Enterprise Applications.
-
--- STEP 0A-4 [AZURE PORTAL]: Assign the blob-read IAM role to the Snowflake principal.
---   1. In the Azure Portal go to:
---        Storage Accounts → <your_storage_account> → Access Control (IAM)
---   2. Click "Add role assignment".
---   3. Role tab:  select "Storage Blob Data Contributor"
---   4. Members tab:
---        Assign access to: User, group, or service principal
---        Click "+ Select members"
---        Search for the AZURE_MULTI_TENANT_APP_NAME value from Step 0A-2
---        Select it and click Select.
---   5. Click "Review + assign" twice to confirm.
-
--- STEP 0A-5 [SQL]: Grant usage on the integration to the DEMO_ADMIN role.
-GRANT USAGE ON INTEGRATION AZURE_STORAGE_INT TO ROLE DEMO_ADMIN;
-
--- =============================================================================
--- 0B. AZURE STORAGE QUEUE + EVENT GRID SUBSCRIPTION
---     The queue records each new blob; Event Grid pushes events to it.
---     All steps here are in the Azure Portal — no SQL required.
--- =============================================================================
-
--- STEP 0B-1 [AZURE PORTAL]: Create a Storage Queue.
---   1. In the Azure Portal open your Storage Account
---      (the same account that holds your blob container).
---   2. In the left menu go to: Data storage → Queues.
---   3. Click "+ Queue".
---   4. Enter a queue name (e.g. snowpipe-queue) and click OK.
---   The queue now appears in the Queues list.
---   Note the queue name — you will need it in Step 0B-2 and Section 0C.
-
--- STEP 0B-2 [AZURE PORTAL]: Copy the Storage Queue URL.
---   1. Click the queue you just created.
---   2. The full URL is shown at the top of the page, e.g.:
---        https://<storage_account>.queue.core.windows.net/<queue_name>
---   Record this URL exactly.
---   IMPORTANT: Keep the https:// prefix.
---              Do NOT change it to azure:// — Snowflake requires https:// here.
-
--- STEP 0B-3 [AZURE PORTAL]: Create an Event Grid subscription.
---   This subscription fires an event into the queue whenever a blob is created.
---   1. Still in your Storage Account, go to: Events (left menu).
---   2. Click "+ Event Subscription".
---   3. Fill in the Basic tab:
---        Name:              snowpipe-event  (any descriptive name)
---        Event Schema:      Event Grid Schema
---                           !! Do NOT select "Cloud Event Schema v1.0" !!
---                           Snowflake only supports Event Grid Schema.
---        Filter to Event Types:
---                           Tick "Blob Created" (Microsoft.Storage.BlobCreated)
---                           Untick all other event types.
---        Endpoint Type:     Storage Queues
---        Endpoint:          Click "Select an endpoint"
---                             Storage account: <your_storage_account>
---                             Queue: <queue from Step 0B-1>
---                           Click "Confirm selection".
---   4. Before clicking Create, switch to the "Filters" tab:
---        Enable subject filtering: turn ON
---        Subject Begins With:
---          /blobServices/default/containers/<your_container>/blobs/
---          (Replace <your_container> with your blob container name.)
---        Optionally add "Subject Ends With: .csv" to limit to CSV files only.
---   5. Click Create.
---   Verify the subscription appears in the Events pane of your storage account.
---   Test: Upload a file to the container — after ~30 s check the queue
---         message count; it should increment by 1.
-
--- =============================================================================
--- 0C. NOTIFICATION INTEGRATION
---     Snowflake polls the Storage Queue via this integration to trigger pipes.
--- =============================================================================
-
--- STEP 0C-1 [SQL]: Create the notification integration.
---   Replace <your_storage_account>, <your_queue_name>, and <your_azure_tenant_id>
---   with your actual values (queue URL from Step 0B-2).
-CREATE OR REPLACE NOTIFICATION INTEGRATION AZURE_SNOWPIPE_INT
-  ENABLED = TRUE
-  TYPE = QUEUE
-  NOTIFICATION_PROVIDER = AZURE_STORAGE_QUEUE
-  AZURE_STORAGE_QUEUE_PRIMARY_URI = 'https://<your_storage_account>.queue.core.windows.net/<your_queue_name>'
-  AZURE_TENANT_ID = '<your_azure_tenant_id>'
-  COMMENT = 'Notification integration for Snowpipe auto-ingest from ADLS Gen2';
-
--- STEP 0C-2 [SQL]: Describe the notification integration.
---   Run this and record two values from the output:
---     AZURE_CONSENT_URL          → open in browser (Step 0C-3)
---     AZURE_MULTI_TENANT_APP_NAME → use for IAM assignment (Step 0C-4)
---   NOTE: This is a DIFFERENT service principal from the storage integration (0A).
---         Both consent flows and IAM assignments are required independently.
 DESC NOTIFICATION INTEGRATION AZURE_SNOWPIPE_INT;
 
--- STEP 0C-3 [AZURE PORTAL]: Approve the notification service principal.
---   1. Copy the AZURE_CONSENT_URL from the DESC output above.
---   2. Open it in a browser (as Azure AD Global Admin or equivalent).
---   3. Click Accept when prompted.
-
--- STEP 0C-4 [AZURE PORTAL]: Assign the queue IAM role to the Snowflake principal.
---   1. In the Azure Portal navigate to your Storage Queue:
---        Storage Accounts → <your_storage_account>
---        → Data storage → Queues → <your_queue_name>
---        → Access Control (IAM)
---      (You can also grant at the Storage Account level if preferred.)
---   2. Click "Add role assignment".
---   3. Role tab:  select "Storage Queue Data Contributor"
---   4. Members tab:
---        Assign access to: User, group, or service principal
---        Click "+ Select members"
---        Search for the AZURE_MULTI_TENANT_APP_NAME value from Step 0C-2
---        Select it and click Select.
---   5. Click "Review + assign" twice to confirm.
---   Allow 1–2 minutes for the role assignment to propagate before creating pipes.
-
--- STEP 0C-5 [SQL]: Grant usage on the integration to the DEMO_ADMIN role.
-GRANT USAGE ON INTEGRATION AZURE_SNOWPIPE_INT TO ROLE DEMO_ADMIN;
-
--- =============================================================================
--- 0D. EXTERNAL STAGE
---     Maps a Snowflake stage to the ADLS container; used by Snowpipe COPY INTO.
--- =============================================================================
-
-USE SCHEMA MSFT_SNOWFLAKE_DEMO.BRONZE;
-
--- STEP 0D-1 [SQL]: Create the CSV file format used by Snowpipe COPY INTO statements.
-CREATE OR REPLACE FILE FORMAT MSFT_SNOWFLAKE_DEMO.BRONZE.CSV_FORMAT
-  TYPE = 'CSV'
-  FIELD_DELIMITER = ','
-  SKIP_HEADER = 1
-  FIELD_OPTIONALLY_ENCLOSED_BY = '"'
-  NULL_IF = ('', 'NULL', 'null')
-  EMPTY_FIELD_AS_NULL = TRUE
-  TRIM_SPACE = TRUE
-  ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE
-  COMMENT = 'Standard CSV format for Snowpipe ingestion';
-
-GRANT USAGE ON FILE FORMAT MSFT_SNOWFLAKE_DEMO.BRONZE.CSV_FORMAT TO ROLE DEMO_ADMIN;
-
--- STEP 0D-2 [SQL]: Create the external stage.
---   URL must use azure:// and point to the root of your container.
-CREATE OR REPLACE STAGE BRONZE.ADLS_DATA_STAGE
-  URL = 'azure://<your_storage_account>.blob.core.windows.net/snowflake-data/'
-  STORAGE_INTEGRATION = AZURE_STORAGE_INT
-  FILE_FORMAT = (TYPE = 'CSV' FIELD_DELIMITER = ',' SKIP_HEADER = 1
-                 FIELD_OPTIONALLY_ENCLOSED_BY = '"' NULL_IF = ('', 'NULL'))
-  COMMENT = 'External stage for ADLS Gen2 CSV landing zone';
-
-GRANT USAGE ON STAGE BRONZE.ADLS_DATA_STAGE TO ROLE DEMO_ADMIN;
-
--- STEP 0D-3 [SQL]: Verify stage connectivity.
---   A successful LIST (even returning 0 files) confirms the storage integration
---   and IAM role assignment are working correctly.
 USE ROLE DEMO_ADMIN;
 USE WAREHOUSE DEMO_WH;
 USE DATABASE MSFT_SNOWFLAKE_DEMO;
 USE SCHEMA BRONZE;
 
+-- A successful LIST (even 0 files) confirms storage integration + IAM are working
 LIST @BRONZE.ADLS_DATA_STAGE/csv/;
 
 -- =============================================================================
