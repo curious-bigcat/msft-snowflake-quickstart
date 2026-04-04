@@ -101,20 +101,17 @@ See [`01_setup/02_azure_prerequisites.md`](01_setup/02_azure_prerequisites.md) f
 ### Phase 3: Silver Layer — Processing
 | File | Description |
 |---|---|
-| [`03_silver/01_silver_processing.sql`](03_silver/01_silver_processing.sql) | Part 1: `SILVER.DT_ORDERS_CLEANED` (validation, quality flags) → `SILVER.DT_ORDERS_ENRICHED` (customer join, value tiers). Part 2: CDC streams on BRONZE tables, SCD Type 2 via MERGE, Task DAG |
-| [`03_silver/02_dynamic_tables.sql`](03_silver/02_dynamic_tables.sql) | Gold-schema Dynamic Tables built in the Silver layer: `DT_SALES_SUMMARY`, `DT_CUSTOMER_360`, `DT_PRODUCT_PERFORMANCE` (15-min lag) |
-| [`03_silver/03_snowpark_processing.ipynb`](03_silver/03_snowpark_processing.ipynb) | Snowpark: window functions, Python UDF registration, sentiment scoring, writes to GOLD |
+| [`03_silver/01_silver_layer.sql`](03_silver/01_silver_layer.sql) | Part 1: `SILVER.DT_ORDERS_CLEANED` (validation, quality flags) → `SILVER.DT_ORDERS_ENRICHED` (customer join, value tiers). Part 2: CDC streams on BRONZE tables, SCD Type 2 via MERGE, Task DAG. Part 3: Gold-schema Dynamic Tables — `DT_SALES_SUMMARY`, `DT_CUSTOMER_360`, `DT_PRODUCT_PERFORMANCE` (15-min lag) |
+| [`03_silver/02_snowpark_processing.ipynb`](03_silver/02_snowpark_processing.ipynb) | Snowpark: window functions, Python UDF registration, sentiment scoring, writes to GOLD |
 
 **Key patterns:** Dynamic Tables with `DOWNSTREAM` lag, Streams for CDC, Task DAGs (all tasks in SILVER schema), Snowpark DataFrame API, permanent Python UDFs stored in `@ML.ML_MODELS`.
 
 ### Phase 4: Gold Layer — Consumption, ML, and AI
 | File | Description |
 |---|---|
-| [`04_gold/01_materialized_views.sql`](04_gold/01_materialized_views.sql) | Consumption materialized views: `MV_TOP_CUSTOMERS`, `MV_MONTHLY_KPI`, `MV_PRODUCT_HEALTH` — pre-aggregated for BI and low-latency access |
+| [`04_gold/01_gold_layer.sql`](04_gold/01_gold_layer.sql) | Part 1: Materialized Views — `MV_TOP_CUSTOMERS`, `MV_MONTHLY_KPI`, `MV_PRODUCT_HEALTH`. Part 2: Semantic View + Cortex Search services (PRODUCT_REVIEW_SEARCH, SUPPORT_TICKET_SEARCH). Part 3: Cortex Agent + MCP Server + Snowflake Intelligence |
 | [`04_gold/02_ml_models/01_ticket_priority_classifier.ipynb`](04_gold/02_ml_models/01_ticket_priority_classifier.ipynb) | Feature engineering from GOLD tables → RandomForest classifier → Model Registry |
 | [`04_gold/02_ml_models/02_revenue_predictor.ipynb`](04_gold/02_ml_models/02_revenue_predictor.ipynb) | Time-series feature engineering → XGBRegressor → Model Registry |
-| [`04_gold/03_cortex_analyst_and_search.sql`](04_gold/03_cortex_analyst_and_search.sql) | Part 1: Semantic View mapping business concepts (revenue, customers, products) to BRONZE tables. Part 2: Cortex Search services — PRODUCT_REVIEW_SEARCH, SUPPORT_TICKET_SEARCH (hybrid keyword + vector, 1-hr lag) |
-| [`04_gold/04_cortex_agent_and_intelligence.sql`](04_gold/04_cortex_agent_and_intelligence.sql) | Part 1: Cortex Agent with Analyst (SQL), Review Search, Ticket Search tools. Part 2: MCP Server exposing all Cortex tools to external clients (Cursor, Claude Desktop, AI Foundry). Part 3: Publish agent to Snowflake Intelligence chat UI |
 
 **ML stack:** `snowflake.ml.modeling`, Snowflake Model Registry, Snowpark-optimized warehouse (`DEMO_ML_WH`).
 **AI stack:** Cortex Analyst (text-to-SQL), Cortex Search (semantic), Cortex Agent (multi-tool), MCP Server (external access).
@@ -137,16 +134,14 @@ See [`01_setup/02_azure_prerequisites.md`](01_setup/02_azure_prerequisites.md) f
 | 3 | `02_bronze/01_tables_and_data.sql` | DEMO_ADMIN | Snowsight SQL Worksheet |
 | 4 | `02_bronze/02_adls_ingestion.sql` | DEMO_ADMIN | Upload `sample_data/*.csv` to ADLS first, then Snowsight |
 | 5 | `02_bronze/03_fabric_integration.sql` (Section A, then C) | DEMO_ADMIN | Section A: synthetic data to OneLake. Section C: incremental test. |
-| 6 | `03_silver/01_silver_processing.sql` | DEMO_ADMIN | Snowsight SQL Worksheet |
-| 7 | `03_silver/02_dynamic_tables.sql` | DEMO_ADMIN | Snowsight SQL Worksheet |
-| 8 | `03_silver/03_snowpark_processing.ipynb` | DEMO_ADMIN | Snowflake Workspace Notebook |
-| 9 | `04_gold/01_materialized_views.sql` | DEMO_ADMIN | Snowsight SQL Worksheet |
-| 10 | `04_gold/02_ml_models/01_ticket_priority_classifier.ipynb` | DEMO_ML_ENGINEER | Snowflake Workspace Notebook (DEMO_ML_WH) |
-| 11 | `04_gold/02_ml_models/02_revenue_predictor.ipynb` | DEMO_ML_ENGINEER | Snowflake Workspace Notebook (DEMO_ML_WH) |
-| 12 | `04_gold/03_cortex_analyst_and_search.sql` | DEMO_ADMIN | Snowsight SQL Worksheet |
-| 13 | `04_gold/04_cortex_agent_and_intelligence.sql` | DEMO_ADMIN | Snowsight SQL Worksheet |
-| 14 | `05_fabric_and_ai_foundry/01_fabric_snowflake_integration.sql` | ACCOUNTADMIN / DEMO_ADMIN | Snowsight SQL Worksheet |
-| 15 | `05_fabric_and_ai_foundry/02_ai_foundry_guide.md` | — | Fabric Portal + Azure AI Foundry Portal + MCP clients (manual) |
+| 6 | `03_silver/01_silver_layer.sql` | DEMO_ADMIN | Snowsight SQL Worksheet |
+| 7 | `03_silver/02_snowpark_processing.ipynb` | DEMO_ADMIN | Snowflake Workspace Notebook |
+| 8 | `04_gold/01_gold_layer.sql` (Parts 1–2) | DEMO_ADMIN | Snowsight SQL Worksheet |
+| 9 | `04_gold/02_ml_models/01_ticket_priority_classifier.ipynb` | DEMO_ML_ENGINEER | Snowflake Workspace Notebook (DEMO_ML_WH) |
+| 10 | `04_gold/02_ml_models/02_revenue_predictor.ipynb` | DEMO_ML_ENGINEER | Snowflake Workspace Notebook (DEMO_ML_WH) |
+| 11 | `04_gold/01_gold_layer.sql` (Part 3) | DEMO_ADMIN | Snowsight SQL Worksheet — run after ML notebooks |
+| 12 | `05_fabric_and_ai_foundry/01_fabric_snowflake_integration.sql` | ACCOUNTADMIN / DEMO_ADMIN | Snowsight SQL Worksheet |
+| 13 | `05_fabric_and_ai_foundry/02_ai_foundry_guide.md` | — | Fabric Portal + Azure AI Foundry Portal + MCP clients (manual) |
 
 ## Snowflake Object Inventory
 
