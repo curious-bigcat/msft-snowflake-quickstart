@@ -280,6 +280,11 @@ CREATE OR REPLACE FILE FORMAT PARQUET_FORMAT
   TYPE = 'PARQUET'
   COMMENT = 'Standard Parquet format';
 
+-- DEMO_ADMIN owns the pipes (02_adls_ingestion.sql) so it needs USAGE on these formats
+GRANT USAGE ON FILE FORMAT CSV_FORMAT     TO ROLE DEMO_ADMIN;
+GRANT USAGE ON FILE FORMAT JSON_FORMAT    TO ROLE DEMO_ADMIN;
+GRANT USAGE ON FILE FORMAT PARQUET_FORMAT TO ROLE DEMO_ADMIN;
+
 -- =============================================================================
 -- 9. VERIFICATION
 -- =============================================================================
